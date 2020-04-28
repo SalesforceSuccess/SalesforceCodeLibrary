@@ -1,0 +1,188 @@
+/*
+* Description:  This class is used for structure the Itinerary data
+* Data : 2018/10/11
+* Author : Charles 
+*/
+public with sharing class MQItineraryMessage {
+
+
+    public class ItineraryJsonData {
+        public String Id { get; set; }
+        public String Name { get; set; }
+        public String BookingNumber { get; set; }
+        public String ItineraryNo { get; set; }
+        public String Status { get; set; }
+        public String Channel { get; set; }
+        public Integer TobalAmountNet { get; set; }
+        public Decimal Outstanding { get; set; }
+        public Integer TotalPaid { get; set; }
+        public ItineraryItems[] Items { get; set; }
+        public Passengers[] Paxs { get; set; }
+        public Buyer BuyerAccount { get; set; }
+        public Sailing ItinerarySail { get; set; }
+        public String BookingSource { get; set; }
+        public Boolean PIFCompleted { get; set; }
+        public Date TravelEndDate { get; set; }
+
+    }
+    public class Sailing {
+        public String Name { get; set; }
+        public String EmbarkDate { get; set; }
+        public String CruisesCode { get; set; }
+        public String SailingCode { get; set; }
+        public String PackageExternalCode { get; set; }
+        public String DisembarkDate { get; set; }
+    }
+
+    public class ItineraryItems {
+        public String Id { get; set; } //Auto Number
+        public String Type { get; set; } //订单行项目类型
+        public String Quantity { get; set; } //数量
+        public String UnitPrice { get; set; } // 销售单价
+        public String PriceCategory { get; set; }
+        public String ExternalName { get; set; } //Costing中显示的名字
+        public String PassengerNo { get; set; } //哪些人预定了
+        public String ExternalCode { get; set; }
+        public Boolean IsCabin { get; set; }
+        public Boolean IsShip { get; set; }
+        public Boolean IsHotel { get; set; }
+
+
+    }
+    public class Passengers {
+
+        public String Name { get; set; }
+        public String CabinAllocation { get; set; }
+        public String PassengerNo { get; set; }
+        public String PassportNo { get; set; }
+        public String PassengerId { get; set; }
+
+    }
+    public class Buyer {
+        public String AccountId { get; set; }
+        public String Name { get; set; }
+        public String Mobile { get; set; }
+        public String Email { get; set; }
+        public String AccountNumber { get; set; } //Agent Code
+        public Boolean IsPersonAccount { get; set; }
+    }
+
+
+    public static MQBaseMessage.MsgBody[] ItinerariesToStrMsg(List<KaptioTravel__Itinerary__c> itineraries, String action) {
+        Set<Id> itineraryItems = new Set<Id>();
+        Map<Id, String> itemsMapPassengerNo = new Map<Id, String>();
+        for (KaptioTravel__Itinerary__c booking : itineraries) {
+            for (KaptioTravel__Itinerary_Item__c bookingItem : booking.KaptioTravel__Itinerary_Items__r) {
+                itineraryItems.add(bookingItem.Id);
+            }
+        }
+
+        List<UnitPassengerAssignment__c> conJoinPassengerAssignment = new List<UnitPassengerAssignment__c>();
+        conJoinPassengerAssignment = [SELECT Id,Name,ItineraryItem__c,Passenger__r.Name FROM UnitPassengerAssignment__c WHERE ItineraryItem__c IN:itineraryItems FOR UPDATE];
+
+        for (Id itemId : itineraryItems) {
+            String passengerNumbers = '';
+            List<String> paxNumber = new List<String>();
+            for (UnitPassengerAssignment__c unititem : conJoinPassengerAssignment) {
+                if (unititem.ItineraryItem__c == itemId) {
+                    paxNumber.add(unititem.Passenger__r.Name);
+                }
+
+            }
+            passengerNumbers = String.join(paxNumber, '|');
+            itemsMapPassengerNo.put(itemId, passengerNumbers);
+        }
+
+
+        MQBaseMessage.MsgBody[] res = new MQBaseMessage.MsgBody[]{};
+        for (KaptioTravel__Itinerary__c booking : itineraries) {
+            MQBaseMessage.MsgBody mBody = new MQBaseMessage.MsgBody();
+            mBody.action = action.toLowerCase();
+            mBody.obj = 'Itinerary';
+
+            ItineraryJsonData syncItinerary = new ItineraryJsonData();
+            syncItinerary.Id = booking.Id;
+            syncItinerary.Name = booking.Name;
+            syncItinerary.Status = booking.KaptioTravel__Status__c;
+            syncItinerary.Channel = (booking.KaptioTravel__Channel__r.Name == 'B2C' || booking.KaptioTravel__Channel__r.Name == 'Website Direct') ? 'B2C' : 'B2B';
+            syncItinerary.BookingNumber = booking.KaptioTravel__BookingNumber__c;
+            syncItinerary.ItineraryNo = booking.KaptioTravel__Itinerary_No__c;
+            syncItinerary.TobalAmountNet = Math.round(booking.KaptioTravel__TotalAmountNet__c);
+            syncItinerary.Outstanding = Math.round(booking.KaptioTravel__Outstanding__c);
+            syncItinerary.TotalPaid = Math.round(booking.KaptioTravel__Transaction_Amount__c);
+            syncItinerary.PIFCompleted = booking.PIF_Completed__c; // 2019/4/1
+            syncItinerary.TravelEndDate = booking.KaptioTravel__End_Date__c; //订单上行程结束日期
+
+            if (booking.Name.contains('online booking') && booking.CreatedById == '00528000003wxEx') {
+                syncItinerary.BookingSource = 'Website';
+            } else {
+                syncItinerary.BookingSource = 'SFCallCenter';
+            }
+
+            Buyer buyAcc = new Buyer();
+            buyAcc.AccountId = booking.KaptioTravel__Account__r.Id;
+            buyAcc.Name = booking.KaptioTravel__Account__r.Name;
+            buyAcc.Mobile = (booking.KaptioTravel__Account__r.PersonMobilePhone == '' || booking.KaptioTravel__Account__r.PersonMobilePhone == null) ? booking.KaptioTravel__Account__r.Phone : booking.KaptioTravel__Account__r.PersonMobilePhone;
+            buyAcc.Email = booking.KaptioTravel__Account__r.PersonEmail <> null ? booking.KaptioTravel__Account__r.PersonEmail : '' ;
+            buyAcc.AccountNumber = (booking.KaptioTravel__Account__r.AccountNumber <> null) ? booking.KaptioTravel__Account__r.AccountNumber : ''; //Agent Code
+            buyAcc.IsPersonAccount = booking.KaptioTravel__Account__r.IsPersonAccount;
+            syncItinerary.BuyerAccount = buyAcc;
+
+            Sailing sailingItem = new Sailing();
+            sailingItem.Name = booking.Sailing__r.Name;
+            sailingItem.EmbarkDate = String.valueOf(booking.Sailing__r.DepartureDate__c);
+            sailingItem.DisembarkDate = String.valueOf(booking.Sailing__r.DisembarkDate__c);
+            sailingItem.CruisesCode = booking.Sailing__r.Cruise_code__c;
+            sailingItem.SailingCode = booking.Sailing__r.SailingCode__c;
+
+
+            Passengers[] cabinPassengers = new Passengers[]{};
+            ItineraryItems[] bookingItems = new ItineraryItems[]{};
+            for (KaptioTravel__Itinerary_Item__c bookingItem : booking.KaptioTravel__Itinerary_Items__r) {
+                ItineraryItems bookingLineItem = new ItineraryItems();
+                bookingLineItem.Id = bookingItem.Name;
+                bookingLineItem.Type = bookingItem.RecordType.Name;
+                bookingLineItem.Quantity = String.valueOf(bookingItem.KaptioTravel__Quantity__c);
+                if (bookingItem.KaptioTravel__Unit_Price__c != null)
+                    bookingLineItem.UnitPrice = String.valueOf(bookingItem.KaptioTravel__Unit_Price__c); else if (bookingItem.KaptioTravel__Total_Price__c != null)
+                    bookingLineItem.UnitPrice = String.valueOf(bookingItem.KaptioTravel__Total_Price__c / bookingItem.KaptioTravel__Quantity__c); else
+                        bookingLineItem.UnitPrice = '0';
+                bookingLineItem.PriceCategory = bookingItem.KaptioTravel__Price_Category__r.Name;
+                bookingLineItem.ExternalName = bookingItem.KaptioTravel__ExternalName__c;
+                bookingLineItem.PassengerNo = itemsMapPassengerNo.get(bookingItem.Id);
+
+                bookingLineItem.ExternalCode = bookingItem.KaptioTravel__Price_Category__r.ExternalCode__c <> null ? bookingItem.KaptioTravel__Price_Category__r.ExternalCode__c : '' ;
+
+                bookingLineItem.IsCabin = bookingItem.IsCabin__c;
+                bookingLineItem.IsShip = bookingItem.IsShip__c;
+                bookingLineItem.IsHotel = bookingItem.IsHotel__c;
+
+                if (bookingItem.KaptioTravel__ItineraryBooking__r.KaptioTravel__IsPackageBooking__c == true) {
+                    sailingItem.PackageExternalCode = bookingItem.KaptioTravel__ItineraryBooking__r.KaptioTravel__Package__r.ExternalCode__c;
+                }
+                bookingItems.add(bookingLineItem);
+
+            }
+            for (KaptioTravel__Passenger__c bookingPax : booking.KaptioTravel__Passengers__r) {
+                Passengers pItem = new Passengers();
+                pItem.PassengerNo = bookingPax.Name;
+                pItem.Name = bookingPax.KaptioTravel__LastName__c + bookingPax.KaptioTravel__FirstName__c;
+                pItem.CabinAllocation = bookingPax.CabinAllocation__r.Name;
+                pItem.PassportNo = bookingPax.Passport_No__c;
+                pItem.PassengerId = bookingPax.Id;
+                cabinPassengers.add(pItem);
+            }
+
+            syncItinerary.ItinerarySail = sailingItem;
+
+            syncItinerary.Items = bookingItems;
+            syncItinerary.Paxs = cabinPassengers;
+            mBody.data = (Map<String, Object>) JSON.deserializeUntyped(JSON.serialize(syncItinerary));
+            res.add(mBody);
+        }
+
+        return res;
+    }
+
+
+}
