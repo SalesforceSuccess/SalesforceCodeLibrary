@@ -1,0 +1,379 @@
+/*
+* Description : This class is used for summarizing the CampaignMember who take part in a Campaign
+* Author : Charle Zheng
+* Date : 2018/9/12 
+*/
+
+public with sharing class CampaignMemberHandler {
+
+
+  public static void summaryCampaignMembersNumber(List<CampaignMember> newList, Map<Id,CampaignMember> oldMap,String action)
+  {
+
+        Set<Id> CampaignsIds = new Set<Id>();
+
+        for (CampaignMember member : newList) {
+            CampaignsIds.add(member.CampaignId);
+        }
+
+        List<Campaign> relatedCampaings = new List<Campaign>();
+        relatedCampaings = [SELECT Id,Name,Channel__c, (SELECT Id,Name,Status,Recruitment_Channel__c FROM CampaignMembers) FROM Campaign WHERE Id IN:CampaignsIds];
+
+        Integer RegisteredNumber = 0;
+        Integer SelectedNumber = 0;
+        Integer InvitedNumber = 0;
+        Integer ConfirmedAttendingNumber = 0;
+        Integer TotalSignInNumber = 0;
+        Integer WalkInNumber = 0;
+        Integer CallCenterConfirmedAttendNumber = 0;
+
+
+    List<Campaign> updateCampaigns = new List<Campaign>();
+
+    for(Campaign item : relatedCampaings)
+    {
+      for(CampaignMember member : item.CampaignMembers)
+      {
+        
+        if(member.Status <> 'Walk in' && member.Status <> 'Scanned')
+        {
+          RegisteredNumber += 1;
+        }
+        
+        if(member.Status <> 'Registered' && member.Status <> 'Not Selected' && member.Status <> 'Walk in' && member.Status <> 'Scanned')
+        {
+          SelectedNumber += 1;
+        }
+        if(member.Status == 'Invited but Reject to Attend' || member.Status == 'Invited and Confirm to Attend' || member.Status == 'Signed in' || member.Status == 'Lucky Draw Winner' || member.Status == 'No Show')
+        {
+          InvitedNumber += 1;
+          if(member.Status <> 'Invited but Reject to Attend') {
+                        ConfirmedAttendingNumber += 1;
+                        if (member.Recruitment_Channel__c <> null) {
+                            if (member.Recruitment_Channel__c.contains('Call Center Invite')) {
+                                CallCenterConfirmedAttendNumber += 1;
+                            }
+                        }
+                    }
+        }
+        if(member.Status == 'Signed in' || member.Status == 'Lucky Draw Winner' || member.Status == 'Walked in')
+        {
+          TotalSignInNumber +=1;
+        }
+        if(member.Status == 'Walked in')
+        {
+          WalkInNumber += 1; 
+        }
+
+      }
+      item.Registration_Number__c = RegisteredNumber;
+      item.Selected_Number__c = SelectedNumber;
+      item.Invited_Number__c = InvitedNumber;
+      item.Confirmed_Attending_Number__c = ConfirmedAttendingNumber;
+      item.Total_Sign_in_Number__c = TotalSignInNumber;
+      item.Walk_in_Number__c = WalkInNumber;
+      item.Call_Center_Confirmed_Attending_Number__c = CallCenterConfirmedAttendNumber;
+      updateCampaigns.add(item);
+    }
+
+    update updateCampaigns;
+
+  }
+  public static void updateCampaignMemberIdOwner(List<CampaignMember> newList) {
+        List<User> salesUsers = new List<User>();
+        salesUsers = [SELECT Id,Name,Agent_Group_Id__c FROM User WHERE Agent_Group_Id__c = '2' AND IsActive = TRUE];
+
+        Set<Id> userIDs = new Set<Id>();
+        for (User u : salesUsers) {
+            userIDs.add(u.Id);
+        }
+
+
+        List<Group> leadGroup = new List<Group>();
+        leadGroup = [SELECT Id,Name,Type, (SELECT Id,UserOrGroupId FROM GroupMembers) FROM Group WHERE (Name = 'Lead Duplicated Queue' OR Name = 'Lead Nurturing Queue') AND Type = 'Queue'];
+
+        Group duplicatedLead = new Group();
+        Group narturLead = new Group();
+        for (Group g : leadGroup) {
+            if (g.Name == 'Lead Duplicated Queue') {
+                userIDs.add(g.Id);
+                /*
+                for(GroupMember groupMember : leadGroup.GroupMembers)
+                {
+                    userIDs.add(groupMember.UserOrGroupId);
+                }*/
+      }
+      if(g.Name == 'Lead Nurturing Queue')
+      {
+        narturLead = g;
+      }
+    }
+    Set<Id> LeadMemberIds = new Set<Id>();
+    Set<Id> ContactMemberIds = new Set<Id>();
+    
+    for(CampaignMember member : newList) {
+            if (member.LeadId <> null) {
+                LeadMemberIds.add(member.LeadId);
+            }
+            if (member.ContactId <> null) {
+                ContactMemberIds.add(member.ContactId);
+            }
+
+        }
+
+        Map<Id, Lead> mapLeads = new Map<Id, Lead>([SELECT Id,OwnerId,Pre_Owner__c FROM Lead WHERE Id IN:LeadMemberIds AND IsConverted = FALSE]);
+        Map<Id, Contact> mapContacts = new Map<Id, Contact>([SELECT Id,Name,OwnerId FROM Contact WHERE Id IN:ContactMemberIds]);
+
+
+        List<Lead> updatedLeads = new List<Lead>();
+        List<Contact> updatedContacts = new List<Contact>();
+        SalesSupervisor__c SalesSupervisor = SalesSupervisor__c.getValues('UID');
+        for (CampaignMember memberItem : newList) {
+            if (memberItem.LeadId <> null && mapLeads.get(memberItem.LeadId) <> null) {
+                if (!userIDs.contains(mapLeads.get(memberItem.LeadId).OwnerId)) {
+                    System.debug('执行');
+
+                    if (memberItem.Status == 'Invited and Confirm to Attend' || memberItem.Status == 'Invited but Reject to Attend') {
+                        Lead leadItem = mapLeads.get(memberItem.LeadId);
+
+                        System.debug('narturLead:' + narturLead.Id);
+              System.debug('leadItem OwnerId:'+ leadItem.OwnerId);
+              System.debug('Pre OwnerId:' + leadItem.Pre_Owner__c);
+              if(leadItem.OwnerId == narturLead.Id) {
+                                if (leadItem.Pre_Owner__c <> null) {
+                                    if (userIDs.contains(leadItem.Pre_Owner__c)) {
+                                        leadItem.OwnerId = leadItem.Pre_Owner__c;
+                                    }
+                                }
+                            }
+              updatedLeads.add(leadItem);
+            }
+        }
+        
+      }
+
+
+    }
+
+    if(updatedLeads.size()> 0)
+    {
+      update updatedLeads;
+    }
+
+  }
+    //计算关联的Lead/Contact上的Coupon数量
+  public static void populatedCouponAmount(List<CampaignMember> newList){
+
+    Set<Id> leadIds = new Set<Id>();
+    Set<Id> contactIds = new Set<Id>();
+    Set<Id> contactAccountIds = new Set<Id>();
+    Set<Id> campaignIds = new Set<Id>();
+    Map<Id,Id> campaignMemberToCouponTemplateId = new Map<Id,Id>();
+    Map<Id,Id> contactIdToAccountIdMap = new Map<Id,Id>();
+        for (CampaignMember member : newList) {
+            if (member.LeadId != null) {
+                leadIds.add(member.LeadId);
+            }
+            if (member.ContactId != null) {
+                contactIds.add(member.ContactId);
+            }
+            campaignIds.add(member.CampaignId);
+        }
+        //Contact Id 转化为 Account Id
+        for (Contact con : [SELECT Id,AccountId FROM Contact WHERE Id IN:contactIds]) {
+            contactAccountIds.add(con.AccountId);
+        }
+        for (Contact con : [SELECT Id,AccountId FROM Contact WHERE Id IN:contactIds]) {
+            for (Account accItem : [SELECT Id FROM Account WHERE Id IN:contactAccountIds]) {
+                if (con.AccountId == accItem.Id) {
+                    contactIdToAccountIdMap.put(con.Id, accItem.Id);
+                }
+            }
+        }
+
+        List<Campaign> targetCampaigns = new List<Campaign>();
+        targetCampaigns = [SELECT Id,Coupon_Template__c FROM Campaign WHERE Id IN:campaignIds];
+        for (CampaignMember member : newList) {
+            for (Campaign cam : targetCampaigns) {
+                if (member.CampaignId == cam.Id) {
+                    campaignMemberToCouponTemplateId.put(member.Id, cam.Coupon_Template__c);
+                }
+            }
+        }
+        Map<Id, Map<Id, Integer>> leadOrContactSpecificTemplateCouponAmount = new Map<Id, Map<Id, Integer>>();
+        Map<Id, Map<Id, Integer>> leadOrContactSpecificTemplateRedeemedCouponAmount = new Map<Id, Map<Id, Integer>>();
+        //Lead Type Coupon Campaign
+        for (Lead l : [SELECT Id, (SELECT Id,Coupon_Status__c,Coupon_Template__c FROM Coupons__r) FROM Lead WHERE Id IN:leadIds]) {
+            if (l.Coupons__r.size() != null && l.Coupons__r.size() > 0) {
+
+                Map<Id, Integer> couponTemplateToCouponAmount = new Map<Id, Integer>();
+                Map<Id, Integer> couponTemplateToRedeemedCouponAmount = new Map<Id, Integer>();
+                for (Coupon__c c : l.Coupons__r) {
+
+                    if (!couponTemplateToCouponAmount.keySet().contains(c.Coupon_Template__c)) {
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c, 1);
+                    } else {
+            Integer countNum = couponTemplateToCouponAmount.get(c.Coupon_Template__c);
+            couponTemplateToCouponAmount.put(c.Coupon_Template__c,countNum+1);
+          }
+          if(c.Coupon_Status__c == 'Redeemed'){
+            if(!couponTemplateToRedeemedCouponAmount.keySet().contains(c.Coupon_Template__c)){
+              couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,1);
+            }
+            else{
+              Integer countNum = couponTemplateToRedeemedCouponAmount.get(c.Coupon_Template__c);
+                            couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c, countNum + 1);
+                        }
+                    }
+
+                }
+                leadOrContactSpecificTemplateCouponAmount.put(l.Id, couponTemplateToCouponAmount);
+                leadOrContactSpecificTemplateRedeemedCouponAmount.put(l.Id, couponTemplateToRedeemedCouponAmount);
+            }
+        }
+        //Contact Type Coupon Campaign
+        for (Account acc : [SELECT Id, (SELECT Id,Coupon_Status__c,Coupon_Template__c FROM Coupons__r) FROM Account WHERE Id IN:contactAccountIds]) {
+            if (acc.Coupons__r.size() != null && acc.Coupons__r.size() > 0) {
+
+                Map<Id, Integer> couponTemplateToCouponAmount = new Map<Id, Integer>();
+                Map<Id, Integer> couponTemplateToRedeemedCouponAmount = new Map<Id, Integer>();
+                for (Coupon__c c : acc.Coupons__r) {
+
+                    if (!couponTemplateToCouponAmount.keySet().contains(c.Coupon_Template__c)) {
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c, 1);
+                    } else {
+            Integer countNum = couponTemplateToCouponAmount.get(c.Coupon_Template__c);
+            couponTemplateToCouponAmount.put(c.Coupon_Template__c,countNum+1);
+          }
+          if(c.Coupon_Status__c == 'Redeemed'){
+            if(!couponTemplateToRedeemedCouponAmount.keySet().contains(c.Coupon_Template__c)){
+              couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,1);
+            }
+            else{
+              Integer countNum = couponTemplateToRedeemedCouponAmount.get(c.Coupon_Template__c);
+              couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,countNum+1);
+                        }
+                    }
+                }
+                leadOrContactSpecificTemplateCouponAmount.put(acc.Id, couponTemplateToCouponAmount);
+                leadOrContactSpecificTemplateRedeemedCouponAmount.put(acc.Id, couponTemplateToRedeemedCouponAmount);
+            }
+
+        }
+
+
+        System.debug('Map信息：' + leadOrContactSpecificTemplateCouponAmount);
+
+        for (CampaignMember cagMember : newList) {
+            if (cagMember.LeadId != null) {
+
+                if (leadOrContactSpecificTemplateCouponAmount.get(cagMember.LeadId) != null) {
+
+                    Map<Id, Integer> specificTemplateCouponAmount = new Map<Id, Integer>();
+                    specificTemplateCouponAmount = leadOrContactSpecificTemplateCouponAmount.get(cagMember.LeadId);
+
+                    Map<Id, Integer> specificTemplateRedeemedCouponAmount = new Map<Id, Integer>();
+                    specificTemplateRedeemedCouponAmount = leadOrContactSpecificTemplateRedeemedCouponAmount.get(cagMember.LeadId);
+
+                    System.debug('模板数量：' + specificTemplateCouponAmount);
+
+                    if (campaignMemberToCouponTemplateId.get(cagMember.Id) != null) {
+                        cagMember.Total_Coupon_Amount__c = specificTemplateCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        cagMember.Total_Redeemd_Coupon_Amount__c = specificTemplateRedeemedCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                    }
+                }
+      }
+
+      //Contact Type
+      if(cagMember.ContactId != null){
+        Id accId = contactIdToAccountIdMap.get(cagMember.ContactId);
+        if(leadOrContactSpecificTemplateCouponAmount.get(accId) != null) {
+
+                    Map<Id, Integer> specificTemplateCouponAmount = new Map<Id, Integer>();
+                    specificTemplateCouponAmount = leadOrContactSpecificTemplateCouponAmount.get(accId);
+
+                    Map<Id, Integer> specificTemplateRedeemedCouponAmount = new Map<Id, Integer>();
+                    specificTemplateRedeemedCouponAmount = leadOrContactSpecificTemplateRedeemedCouponAmount.get(accId);
+
+                    System.debug('模板数量：' + specificTemplateCouponAmount);
+
+                    if (campaignMemberToCouponTemplateId.get(cagMember.Id) != null) {
+                        cagMember.Total_Coupon_Amount__c = specificTemplateCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        cagMember.Total_Redeemd_Coupon_Amount__c = specificTemplateRedeemedCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                    }
+                }
+      }
+
+    }
+  }
+
+    //系统添加Campaign Member之后，自动创建优惠券
+    public static void createCampaignCouponAuto(List<CampaignMember> newCampaignMembers){
+
+        Map<Id,Id> campaignMemberToCouponTemplateIdMap = new Map<Id,Id>();
+
+        Map<Id,Id> campaignMemberLeadMap = new Map<Id,Id>();
+        Map<Id,Id> campaignMemberContactMap = new Map<Id,Id>();
+
+        Set<Id> campaignIds = new Set<Id>();
+        Set<Id> leadIds = new Set<Id>();
+        Set<Id> contactIds = new Set<Id>();
+
+        for(CampaignMember cgm : newCampaignMembers){
+            campaignIds.add(cgm.CampaignId);
+            if(cgm.LeadId != null){
+                leadIds.add(cgm.LeadId);
+                campaignMemberLeadMap.put(cgm.LeadId,cgm.Id);
+            }
+            if(cgm.ContactId != null){
+                contactIds.add(cgm.ContactId);
+                campaignMemberContactMap.put(cgm.ContactId,cgm.Id);
+            }
+        }
+
+        //根据campaign member 获取对应的Coupon Template Id
+        List<Campaign> targetCampaigns = new List<Campaign>();
+        targetCampaigns = [SELECT Id,Coupon_Template__c FROM Campaign WHERE Id IN : campaignIds AND Coupon_Template__c != NULL ];
+        for(CampaignMember cgm : newCampaignMembers){
+            for(Campaign ca : targetCampaigns){
+                if(cgm.CampaignId == ca.Id){
+                    campaignMemberToCouponTemplateIdMap.put(cgm.Id,ca.Coupon_Template__c);
+                }
+            }
+        }
+
+        List<Coupon__c> newCouponsAutomatically = new List<Coupon__c>();
+
+        for(Lead l: [SELECT Id FROM Lead WHERE Id IN : leadIds]){
+
+            Id cgm = campaignMemberLeadMap.get(l.Id);
+            if(cgm != null && campaignMemberToCouponTemplateIdMap.get(cgm) !=null){
+                Coupon__c c = new Coupon__c();
+                c.Name = 'Coupon Campaign';
+                c.RelatedLead__c = l.Id;
+                c.Coupon_Status__c = 'Active';
+                c.Coupon_Template__c = campaignMemberToCouponTemplateIdMap.get(cgm);
+                newCouponsAutomatically.add(c);
+            }
+        }
+
+        for(Contact c : [SELECT Id,AccountId FROM Contact WHERE Id IN : contactIds]){
+
+            Id cgm = campaignMemberContactMap.get(c.Id);
+            if(cgm != null && campaignMemberToCouponTemplateIdMap.get(cgm) != null ){
+
+                Coupon__c conC = new Coupon__c();
+                conC.Name = 'Coupon Campaign';
+                conC.RelatedAccount__c = c.AccountId;
+                conC.Coupon_Status__c = 'Active';
+                conC.Coupon_Template__c = campaignMemberToCouponTemplateIdMap.get(cgm);
+                newCouponsAutomatically.add(conC);
+            }
+
+        }
+
+        if(newCouponsAutomatically.size() > 0){
+            insert newCouponsAutomatically;
+        }
+    }
+}
