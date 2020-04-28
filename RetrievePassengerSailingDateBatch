@@ -1,0 +1,50 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/4/23
+ * @Version 1.0
+ **/
+
+global with sharing class RetrievePassengerSailingDateBatch implements Database.Batchable<SObject> {
+    global Database.QueryLocator start(Database.BatchableContext BC) {
+
+        return Database.getQueryLocator([select id,SailDate__c,Passenger_Account__c,KaptioTravel__PersonAccount__c from KaptioTravel__Passenger__c where Passenger_Account__c != null or  KaptioTravel__PersonAccount__c != null]);
+    }
+
+    global void execute(Database.BatchableContext BC, List<sObject> scope) {
+        List<KaptioTravel__Passenger__c> paxs = (List<KaptioTravel__Passenger__c>)scope;
+
+        Set<Id> accountIds = new Set<Id>();
+
+        for(KaptioTravel__Passenger__c p : paxs){
+
+            if(p.Passenger_Account__c != null || p.KaptioTravel__PersonAccount__c!= null){
+                accountIds.add(p.KaptioTravel__PersonAccount__c);
+                accountIds.add(p.Passenger_Account__c);
+            }
+        }
+
+        List<Account> paxAccounts = new List<Account>();
+        paxAccounts = [SELECT Id,Latest_embark_date__c,(SELECT Id,SailDate__c FROM Identity_Passengers__r WHERE (PassengerStatus__c = '1 Booked' OR PassengerStatus__c = '2 Reserved') AND SailDate__c != NULL AND SailDate__c >= today  ORDER BY SailDate__c ASC Limit 1) FROM Account WHERE IsPersonAccount = true and Id IN: accountIds];
+
+
+        List<Account> tobeUpdatesAccount = new List<Account>();
+        if(paxAccounts.size() > 0){
+            for(Account acc : paxAccounts){
+                if(acc.Identity_Passengers__r != null && acc.Identity_Passengers__r.size() > 0){
+                    acc.Latest_embark_date__c = acc.Identity_Passengers__r[0].SailDate__c;
+                }
+                tobeUpdatesAccount.add(acc);
+            }
+        }
+
+        system.debug('要更新的数量是：' + tobeUpdatesAccount.size());
+        if(tobeUpdatesAccount.size() > 0){
+            update tobeUpdatesAccount;
+        }
+    }
+
+    global void finish(Database.BatchableContext BC){
+
+    }
+}
