@@ -1,0 +1,46 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/4/23
+ * @Version 1.0
+ **/
+
+global with sharing class RetrievePassengerCouponValueAmountBatch implements Database.Batchable<SObject>  {
+    global Database.QueryLocator start(Database.BatchableContext BC) {
+
+        return Database.getQueryLocator([SELECT Id,Coupon_Status__c,OfferValueNew__c,RelatedPassenger__c FROM Coupon__c WHERE  RelatedPassenger__c != NULL]);
+    }
+
+    global void execute(Database.BatchableContext BC, List<sObject> scope) {
+        List<Coupon__c> couponsArray = new List<Coupon__c>();
+        couponsArray = (List<Coupon__c>)scope;
+        Set<Id> paxIds = new Set<Id>();
+        for(Coupon__c item : couponsArray){
+            paxIds.add(item.RelatedPassenger__c);
+        }
+
+        List<KaptioTravel__Passenger__c> paxs = new List<KaptioTravel__Passenger__c>();
+        paxs = [SELECT Id,Valid_OCV_coupon_amount__c,(SELECT Id,OfferValueNew__c FROM Coupon__r WHERE Coupon_Status__c = 'Active' AND Coupon_Type__c = 'OCV' AND OfferValueNew__c != NULL ) FROM KaptioTravel__Passenger__c WHERE Id IN: paxIds];
+
+        List<KaptioTravel__Passenger__c> updatesPax = new List<KaptioTravel__Passenger__c>();
+
+        for(KaptioTravel__Passenger__c pItem : paxs){
+            Decimal totalCouponOfferValue = 0;
+            for(Coupon__c c : pItem.Coupon__r){
+                if(c.OfferValueNew__c != null && c.OfferValueNew__c != '' && c.OfferValueNew__c.isNumeric()){
+                    totalCouponOfferValue += Decimal.valueOf(c.OfferValueNew__c);
+                }
+            }
+            pItem.Valid_OCV_coupon_amount__c = totalCouponOfferValue;
+            updatesPax.add(pItem);
+        }
+
+        if(updatesPax.size() > 0){
+            update updatesPax;
+        }
+    }
+
+    global void finish(Database.BatchableContext BC){
+
+    }
+}
