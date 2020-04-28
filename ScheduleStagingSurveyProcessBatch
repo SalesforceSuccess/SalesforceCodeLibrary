@@ -1,0 +1,7 @@
+global class ScheduleStagingSurveyProcessBatch implements Schedulable {
+    global void execute(SchedulableContext sc) {
+          
+          StagingSurveyProcessBatch stagingsurveybatch = new StagingSurveyProcessBatch();
+          Database.executeBatch(stagingsurveybatch);
+    }
+}
