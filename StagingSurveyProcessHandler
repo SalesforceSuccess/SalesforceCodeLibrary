@@ -1,0 +1,224 @@
+/*
+* Author : Charles Zheng
+* Date  : 2018/9/17
+* Description： This class is used for pre-process the staging survey object. 
+*/
+
+public with sharing class StagingSurveyProcessHandler {
+
+
+    public static void InsertOnboardSurveyMappedToStagingSurvey()
+    {
+
+      DescribeSObjectResult describeResult = Staging_Survey__c.getSObjectType().getDescribe();
+      Map<String,Schema.SObjectField> fieldMap = describeResult.fields.getMap();
+      Set<String> stagingSurveyFields = fieldMap.keySet(); 
+      List<String> stagingFieldsList = new List<String>(stagingSurveyFields);
+      String sqlQuery = 'SELECT ' + String.join(stagingFieldsList,',') + ' From Staging_Survey__c where HasProcessed__c = false limit 1000';
+
+      List<Staging_Survey__c> stagingSurveyList = new List<Staging_Survey__c>();
+      stagingSurveyList = Database.query(sqlQuery);
+
+      
+      Map<String,Sailing__c> mapSailingnsByCruisesCode = new Map<String,Sailing__c>();
+        for(Sailing__c sailingItem : [Select Id,Name,Cruise_code__c,SailingCode__c From Sailing__c where Cruise_code__c <> Null and Cruise_code__c <> ''])
+        {
+            if(sailingItem.Cruise_code__c <> null && sailingItem.Cruise_code__c <> '')
+            {
+                mapSailingnsByCruisesCode.put(sailingItem.Cruise_code__c, sailingItem);
+            }
+            
+        }
+        System.debug('船期数量:'+mapSailingnsByCruisesCode.size());
+
+        Map<String,KaptioTravel__Passenger__c> mapPassengersById = new Map<String,KaptioTravel__Passenger__c>();
+        for(KaptioTravel__Passenger__c paxItem : [Select Id,Name From KaptioTravel__Passenger__c order by createddate desc limit 50000])
+        {
+            mapPassengersById.put(paxItem.Name, paxItem);
+        }
+        System.debug('乘客数量:'+mapPassengersById.size());
+
+        List<OnboardSurvey__c> newOnBoardSurvey = new List<OnboardSurvey__c>();
+        List<Staging_Survey__c> updateStagingSurvey = new List<Staging_Survey__c>();
+        for(Staging_Survey__c stagingSurvey : stagingSurveyList)
+        {
+            OnboardSurvey__c survey = new OnboardSurvey__c();
+            if(mapSailingnsByCruisesCode.get(stagingSurvey.SailingCode__c) <> null)
+            {
+                survey.Sailing__c = mapSailingnsByCruisesCode.get(stagingSurvey.SailingCode__c).Id;
+            }
+            if(mapPassengersById.get(stagingSurvey.PassengerNo__c) <> null)
+            {
+                survey.Passenger__c = mapPassengersById.get(stagingSurvey.PassengerNo__c).Id;
+            }
+            survey.Name = stagingSurvey.PassengerNo__c;
+            survey.MXP_Booking_ID__c  = stagingSurvey.MXPBookingID__c;
+            survey.Cabin_Number__c  = stagingSurvey.Cabin_Number__c;
+            survey.SailDate__c   = stagingSurvey.SailDate__c;
+            survey.StagingSurvey__c = stagingSurvey.Id;
+            survey.SailingCode__c = stagingSurvey.SailingCode__c;
+            survey.PassengerNo__c = stagingSurvey.PassengerNo__c;
+
+            
+            //Ship Management
+            survey.Captain__c   = stagingSurvey.Captain__c;
+            survey.Hotel_Manager__c = stagingSurvey.Hotel_Manager__c;
+            survey.Program_Director__c = stagingSurvey.Program_Director__c;
+            survey.Maitre_d__c = stagingSurvey.Maitre_d__c;
+            survey.Reception_Desk__c = stagingSurvey.Reception_Desk__c;
+            survey.Shopping_Concierge__c = stagingSurvey.Shopping_Concierge__c;
+            survey.Ship_Comment__c = stagingSurvey.Ship_Comment__c;
+
+            //Onboard Dining
+            survey.Breakfast__c = stagingSurvey.Breakfast__c;
+            survey.Lunch__c = stagingSurvey.Lunch__c;
+            survey.Dinner__c = stagingSurvey.Dinner__c;
+            survey.Dining_Comment__c = stagingSurvey.Dining_Comment__c;
+
+            //Restaurant Service
+            survey.Restaurant_Care_Attention__c = stagingSurvey.Restaurant_Care_Attention__c;
+            survey.Restaurant_Friendliness_of_Service__c = stagingSurvey.Restaurant_Friendliness_of_Service__c;
+            survey.Restaurant_Service_Comment__c = stagingSurvey.Restaurant_Service_Comment__c;
+
+            //Bar Servie
+            survey.Bar_Friendliness_of_Service__c = stagingSurvey.Bar_Friendliness_of_Service__c;
+            survey.Bar_Care_Attention__c = stagingSurvey.Bar_Care_Attention__c;
+            survey.Bar_Comment__c = stagingSurvey.Bar_Comment__c;
+            //Ship
+            survey.Overall_Impression_of_Ship__c = stagingSurvey.Overall_Impression_of_Ship__c;
+            survey.Ship_Cleanliness__c = stagingSurvey.Ship_Cleanliness__c;
+            survey.Layout_of_Public_Areas__c = stagingSurvey.Layout_of_Public_Areas__c;
+            survey.Ship_Comment__c = stagingSurvey.Ship_Comment__c;
+            //Stateroom
+            survey.Stateroom_Overall_Impression__c = stagingSurvey.Stateroom_Overall_Impression__c;
+            survey.Stateroom_Amenities__c = stagingSurvey.Stateroom_Amenities__c;
+            survey.Stateroom_Cleanliness__c = stagingSurvey.Stateroom_Cleanliness__c;
+            survey.Stateroom_Steward_Stewardess__c = stagingSurvey.Stateroom_Steward_Stewardess__c;
+            survey.Bathroom_Facilities__c = stagingSurvey.Bathroom_Facilities__c;
+            survey.Stateroom_Comment__c = stagingSurvey.Stateroom_Comment__c;
+
+            //Shore Excursions
+            survey.Overall_Experience__c = stagingSurvey.Overall_Experience__c;
+            survey.Overall_Impression_of_Guides__c = stagingSurvey.Overall_Impression_of_Guides__c;
+            survey.Organization__c = stagingSurvey.Organization__c;
+            survey.Amount_of_Time_for_Shopping__c = stagingSurvey.Amount_of_Time_for_Shopping__c;
+            survey.Amount_of_Leisure_Time__c = stagingSurvey.Amount_of_Leisure_Time__c;
+            survey.Shore_Excursions_Comment__c = stagingSurvey.Shore_Excursions_Comment__c;
+
+            //Onboard Entertainment & Enrichment
+            survey.Entertainment_Overall_Impression__c = stagingSurvey.Entertainment_Overall_Impression__c;
+            survey.TV_Movies__c = stagingSurvey.TV_Movies__c;
+            survey.Onboard_Musician__c = stagingSurvey.Onboard_Musician__c;
+            survey.Internet__c = stagingSurvey.Internet__c;
+            survey.Viking_Daily__c = stagingSurvey.Viking_Daily__c;
+            survey.Onboard_Information_Briefings__c = stagingSurvey.Onboard_Information_Briefings__c;
+            survey.Lectures__c = stagingSurvey.Lectures__c;
+            survey.Onboard_Entertainment_Comment__c = stagingSurvey.Onboard_Entertainment_Comment__c;
+            
+            //Itinerary
+            survey.Overall_Impression_of_Cities_Visited__c = stagingSurvey.Overall_Impression_of_Cities_Visited__c;
+            survey.Itinerary_Comment__c = stagingSurvey.Itinerary_Comment__c;
+
+            //VRC Experience
+            survey.Overall_Entire_Trip__c = stagingSurvey.Overall_Entire_Trip__c;
+            survey.Overall_Cruise__c = stagingSurvey.Overall_Cruise__c;
+            survey.Value_Money__c = stagingSurvey.Value_Money__c;
+            survey.Vacation_vs_Other__c = stagingSurvey.Vacation_vs_Other__c;
+            survey.Viking_again__c = stagingSurvey.Viking_again__c;
+            survey.Viking_refer__c = stagingSurvey.Viking_refer__c;
+           
+            //Reservation Experience
+            survey.Reservation_Experience__c = stagingSurvey.Reservation_Experience__c;
+            survey.Documentation_Ticketing__c = stagingSurvey.Documentation_Ticketing__c;
+            survey.Reservation_Comment__c = stagingSurvey.Reservation_Comment__c;
+
+            //Flight and Train Arrangement
+            survey.Flights__c = stagingSurvey.Flights__c;
+            survey.Train_Arrangements__c = stagingSurvey.Train_Arrangements__c;
+            survey.Flight_Train_Comment__c = stagingSurvey.Flight_Train_Comment__c;
+
+            //Transfers
+            survey.From_Airport__c = stagingSurvey.From_Airport__c;
+            survey.From_Hotel__c = stagingSurvey.From_Hotel__c;
+            survey.From_Train_Station__c = stagingSurvey.From_Train_Station__c;
+            survey.Transfer_Comment__c = stagingSurvey.Transfer_Comment__c;
+
+            //Like to travel River Cruises
+            survey.Amazon__c = stagingSurvey.Amazon__c;
+            survey.Danube__c = stagingSurvey.Danube__c;
+            survey.Dnieper_Ukraine__c = stagingSurvey.Dnieper_Ukraine__c;
+            survey.Douro__c = stagingSurvey.Douro__c;
+            survey.Elbe__c = stagingSurvey.Elbe__c;
+            survey.Irrawaddy_Myanmar_Burma__c = stagingSurvey.Irrawaddy_Myanmar_Burma__c;
+            survey.Main_Moselle__c = stagingSurvey.Main_Moselle__c;
+            survey.Mekong_CambodiaNietnam__c = stagingSurvey.Mekong_CambodiaNietnam__c;
+            survey.Mississippi__c = stagingSurvey.Mississippi__c;
+            survey.Nile__c = stagingSurvey.Nile__c;
+            survey.Rhine__c = stagingSurvey.Rhine__c;
+            survey.Rhone_Saone__c = stagingSurvey.Rhone_Saone__c;
+            survey.Seine__c = stagingSurvey.Seine__c;
+            survey.Volga_Russia__c = stagingSurvey.Volga_Russia__c;
+            survey.Yangtze__c = stagingSurvey.Yangtze__c;
+
+            //Like to travel Land Tours
+            survey.Australia_New_Zealand__c = stagingSurvey.Australia_New_Zealand__c;
+            survey.China__c = stagingSurvey.China__c;
+            survey.India__c = stagingSurvey.India__c;
+            survey.Italy__c = stagingSurvey.Italy__c;
+            survey.Kenya_Tanzania__c = stagingSurvey.Kenya_Tanzania__c;
+            survey.Russia__c = stagingSurvey.Russia__c;
+            survey.South_Africa_Botswana__c = stagingSurvey.South_Africa_Botswana__c;
+            //survey.South_America__c = stagingSurvey.South_America__c;
+            survey.Southeast_Asia__c = stagingSurvey.Southeast_Asia__c;
+            survey.Spain_Portugal__c = stagingSurvey.Spain_Portugal__c;
+            survey.Switzerland__c = stagingSurvey.Switzerland__c;
+            survey.Turkey__c = stagingSurvey.Turkey__c;
+
+            //Like to travel next Ocean Cruises
+            survey.Western_Mediterranean__c = stagingSurvey.Western_Mediterranean__c;
+            survey.Eastern_Mediterranean__c = stagingSurvey.Eastern_Mediterranean__c;
+            survey.Scandinavia_Baltics__c = stagingSurvey.Scandinavia_Baltics__c;
+            survey.Caribbean__c = stagingSurvey.Caribbean__c;
+            survey.Asia__c = stagingSurvey.Asia__c;
+            survey.South_Pacific__c = stagingSurvey.South_Pacific__c;
+            survey.Alaska__c = stagingSurvey.Alaska__c;
+            survey.Canada_New_England__c = stagingSurvey.Canada_New_England__c;
+
+            //Travel Preference
+            survey.Plan_Vacations__c = stagingSurvey.Plan_Vacations__c;
+            survey.Far_ahead_booking__c = stagingSurvey.Far_ahead_booking__c;
+
+            if(stagingSurvey.PleaseContactMe__c == Null)
+            {
+                survey.PleaseContactMe__c = False;
+            }
+            else
+            {
+                survey.PleaseContactMe__c  = Integer.valueOf(stagingSurvey.PleaseContactMe__c) == 0 ? False : True; 
+            }
+
+            stagingSurvey.HasProcessed__c = True;
+            newOnBoardSurvey.add(survey);
+            updateStagingSurvey.add(stagingSurvey);
+
+        }
+        System.debug('要插入的Survey数量:'+ newOnBoardSurvey.size());
+        
+        if(newOnBoardSurvey.size() > 0)
+        {
+            try
+            {
+                insert newOnBoardSurvey;
+                update updateStagingSurvey;
+            }
+            catch(Exception ex)
+            {
+                Callout_Log__c calllog  = new Callout_Log__c();
+                calllog.Name = 'StagingSurveyProcessBatch';
+                calllog.DataBody__c = 'Error Message:'+ex.getMessage()+'************ Error Line:'+ex.getLineNumber();
+                insert calllog;
+            }
+            
+        }
+    }
+}
