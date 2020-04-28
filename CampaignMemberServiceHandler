@@ -1,0 +1,156 @@
+/**
+ * @Description 
+ * @Author Eric Liang
+ * @Date 2020/3/26
+ * @Version 1.0
+ **/
+
+public with sharing class CampaignMemberServiceHandler {
+
+    //计算关联的Lead/Contact上的Coupon数量
+    public static List<CampaignMember> populatedCouponAmount(List<CampaignMember> newList){
+
+        Set<Id> leadIds = new Set<Id>();
+        Set<Id> contactIds = new Set<Id>();
+        Set<Id> contactAccountIds = new Set<Id>();
+        Set<Id> campaignIds = new Set<Id>();
+        Map<Id,Id> campaignMemberToCouponTemplateId = new Map<Id,Id>();
+        Map<Id,Id> contactIdToAccountIdMap = new Map<Id,Id>();
+        for (CampaignMember member : newList) {
+            if (member.LeadId != null) {
+                leadIds.add(member.LeadId);
+            }
+            if (member.ContactId != null) {
+                contactIds.add(member.ContactId);
+            }
+            campaignIds.add(member.CampaignId);
+        }
+        //Contact Id 转化为 Account Id
+        for (Contact con : [SELECT Id,AccountId FROM Contact WHERE Id IN:contactIds]) {
+            contactAccountIds.add(con.AccountId);
+        }
+        for (Contact con : [SELECT Id,AccountId FROM Contact WHERE Id IN:contactIds]) {
+            for (Account accItem : [SELECT Id FROM Account WHERE Id IN:contactAccountIds]) {
+                if (con.AccountId == accItem.Id) {
+                    contactIdToAccountIdMap.put(con.Id, accItem.Id);
+                }
+            }
+        }
+
+        for (CampaignMember member : newList) {
+            for (Campaign cam : [SELECT Id,Coupon_Template__c FROM Campaign WHERE Id IN:campaignIds]) {
+                if (member.CampaignId == cam.Id) {
+                    campaignMemberToCouponTemplateId.put(member.Id, cam.Coupon_Template__c);
+                }
+            }
+        }
+        Map<Id, Map<Id, Integer>> leadOrContactSpecificTemplateCouponAmount = new Map<Id, Map<Id, Integer>>();
+        Map<Id, Map<Id, Integer>> leadOrContactSpecificTemplateRedeemedCouponAmount = new Map<Id, Map<Id, Integer>>();
+        //Lead Type Coupon Campaign
+        for (Lead l : [SELECT Id, (SELECT Id,Coupon_Status__c,Coupon_Template__c FROM Coupons__r) FROM Lead WHERE Id IN:leadIds]) {
+            if (l.Coupons__r.size() != null && l.Coupons__r.size() > 0) {
+
+                Map<Id, Integer> couponTemplateToCouponAmount = new Map<Id, Integer>();
+                Map<Id, Integer> couponTemplateToRedeemedCouponAmount = new Map<Id, Integer>();
+                for (Coupon__c c : l.Coupons__r) {
+
+                    if (!couponTemplateToCouponAmount.keySet().contains(c.Coupon_Template__c)) {
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c, 1);
+                    } else {
+                        Integer countNum = couponTemplateToCouponAmount.get(c.Coupon_Template__c);
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c,countNum+1);
+                    }
+                    if(c.Coupon_Status__c == 'Redeemed'){
+                        if(!couponTemplateToRedeemedCouponAmount.keySet().contains(c.Coupon_Template__c)){
+                            couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,1);
+                        }
+                        else{
+                            Integer countNum = couponTemplateToRedeemedCouponAmount.get(c.Coupon_Template__c);
+                            couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c, countNum + 1);
+                        }
+                    }
+
+                }
+                leadOrContactSpecificTemplateCouponAmount.put(l.Id, couponTemplateToCouponAmount);
+                leadOrContactSpecificTemplateRedeemedCouponAmount.put(l.Id, couponTemplateToRedeemedCouponAmount);
+            }
+        }
+        //Contact Type Coupon Campaign
+        for (Account acc : [SELECT Id, (SELECT Id,Coupon_Status__c,Coupon_Template__c FROM Coupons__r) FROM Account WHERE Id IN:contactAccountIds]) {
+            if (acc.Coupons__r.size() != null && acc.Coupons__r.size() > 0) {
+
+                Map<Id, Integer> couponTemplateToCouponAmount = new Map<Id, Integer>();
+                Map<Id, Integer> couponTemplateToRedeemedCouponAmount = new Map<Id, Integer>();
+                for (Coupon__c c : acc.Coupons__r) {
+
+                    if (!couponTemplateToCouponAmount.keySet().contains(c.Coupon_Template__c)) {
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c, 1);
+                    } else {
+                        Integer countNum = couponTemplateToCouponAmount.get(c.Coupon_Template__c);
+                        couponTemplateToCouponAmount.put(c.Coupon_Template__c,countNum+1);
+                    }
+                    if(c.Coupon_Status__c == 'Redeemed'){
+                        if(!couponTemplateToRedeemedCouponAmount.keySet().contains(c.Coupon_Template__c)){
+                            couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,1);
+                        }
+                        else{
+                            Integer countNum = couponTemplateToRedeemedCouponAmount.get(c.Coupon_Template__c);
+                            couponTemplateToRedeemedCouponAmount.put(c.Coupon_Template__c,countNum+1);
+                        }
+                    }
+                }
+                leadOrContactSpecificTemplateCouponAmount.put(acc.Id, couponTemplateToCouponAmount);
+                leadOrContactSpecificTemplateRedeemedCouponAmount.put(acc.Id, couponTemplateToRedeemedCouponAmount);
+            }
+
+        }
+        System.debug('Map信息：' + leadOrContactSpecificTemplateCouponAmount);
+
+        List<CampaignMember> results = new List<CampaignMember>();
+
+        for (CampaignMember cagMember : newList) {
+            if (cagMember.LeadId != null) {
+
+                if (leadOrContactSpecificTemplateCouponAmount.get(cagMember.LeadId) != null) {
+
+                    Map<Id, Integer> specificTemplateCouponAmount = new Map<Id, Integer>();
+                    specificTemplateCouponAmount = leadOrContactSpecificTemplateCouponAmount.get(cagMember.LeadId);
+
+                    Map<Id, Integer> specificTemplateRedeemedCouponAmount = new Map<Id, Integer>();
+                    specificTemplateRedeemedCouponAmount = leadOrContactSpecificTemplateRedeemedCouponAmount.get(cagMember.LeadId);
+
+                    System.debug('模板数量：' + specificTemplateCouponAmount);
+
+                    if (campaignMemberToCouponTemplateId.get(cagMember.Id) != null) {
+                        cagMember.Total_Coupon_Amount__c = specificTemplateCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        cagMember.Total_Redeemd_Coupon_Amount__c = specificTemplateRedeemedCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        results.add(cagMember);
+                    }
+                }
+            }
+
+            //Contact Type
+            if(cagMember.ContactId != null){
+                Id accId = contactIdToAccountIdMap.get(cagMember.ContactId);
+                if(leadOrContactSpecificTemplateCouponAmount.get(accId) != null) {
+
+                    Map<Id, Integer> specificTemplateCouponAmount = new Map<Id, Integer>();
+                    specificTemplateCouponAmount = leadOrContactSpecificTemplateCouponAmount.get(accId);
+
+                    Map<Id, Integer> specificTemplateRedeemedCouponAmount = new Map<Id, Integer>();
+                    specificTemplateRedeemedCouponAmount = leadOrContactSpecificTemplateRedeemedCouponAmount.get(accId);
+
+                    System.debug('模板数量：' + specificTemplateCouponAmount);
+
+                    if (campaignMemberToCouponTemplateId.get(cagMember.Id) != null) {
+                        cagMember.Total_Coupon_Amount__c = specificTemplateCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        cagMember.Total_Redeemd_Coupon_Amount__c = specificTemplateRedeemedCouponAmount.get(campaignMemberToCouponTemplateId.get(cagMember.Id));
+                        results.add(cagMember);
+                    }
+                }
+            }
+        } //for 结束
+
+        return results;
+    }
+}
