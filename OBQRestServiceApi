@@ -1,0 +1,20 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/3/16
+ * @Version 1.0
+ **/
+@RestResource(UrlMapping='/SurveyServices/Response')
+global with sharing class OBQRestServiceApi {
+
+    @HttpPost
+    global static void consumeOBQData() {
+
+        RestRequest req = RestContext.request;
+        Blob body = req.requestBody;
+        String strJson = body.toString();
+        OBQService.parseOBQData(strJson);
+
+    }
+
+}
