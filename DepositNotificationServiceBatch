@@ -1,0 +1,132 @@
+global class DepositNotificationServiceBatch implements Database.Batchable<SObject>, Database.Stateful, Database.AllowsCallouts {
+
+    global Database.QueryLocator start(Database.BatchableContext bc) {
+
+        Date dt = Date.newInstance(2020, 1, 1);
+
+        return Database.getQueryLocator([
+                SELECT Id,Name,KaptioTravel__Status__c,CreatedDate,Due_Day__c,Owner.Id,Owner.Phone,Owner.Email,KaptioTravel__Account__r.PersonEmail,KaptioTravel__Account__r.PersonMobilePhone,
+                        KaptioTravel__Account__r.LastName,KaptioTravel__Account__r.FirstName,KaptioTravel__Itinerary_No__c,KaptioTravel__Channel__r.KaptioTravel__ChannelCode__c,KaptioTravel__Transaction_Amount__c
+                FROM KaptioTravel__Itinerary__c
+                WHERE SailingDate__c >= :dt AND Due_Day__c != NULL AND (KaptioTravel__Status__c = 'Quoted' OR KaptioTravel__Status__c = 'Booked Deposited' OR KaptioTravel__Status__c = 'New') AND (KaptioTravel__Channel__r.KaptioTravel__ChannelCode__c = 'B2C' OR KaptioTravel__Channel__r.KaptioTravel__ChannelCode__c = 'WDB' ) AND (Itinerary_Type__c = 'B2C Customer' OR Itinerary_Type__c = 'Desktop Website' OR Itinerary_Type__c = 'Mobile Website')
+                AND (Id = 'a0d0w000000tNvA' OR Id = 'a0d0w000000tNnk')
+        ]);
+
+    }
+
+    global void execute(Database.BatchableContext BC, List<SObject> scope) {
+
+
+        List<KaptioTravel__Itinerary__c> tobeLostItineraries = new List<KaptioTravel__Itinerary__c>();
+        List<KaptioTravel__Itinerary__c> tobeCancelledItineraries = new List<KaptioTravel__Itinerary__c>();
+        SMSServiceHandler.JSONSMSBody smsBody = new SMSServiceHandler.JSONSMSBody();
+        List<SMSServiceHandler.BatchSmsContent> smsContentsList = new List<SMSServiceHandler.BatchSmsContent>();
+        Map<String, SMSServiceHandler.ItineraryEntityInfo> mapEmailToItineraryInfo = new Map<String, SMSServiceHandler.ItineraryEntityInfo>();
+
+
+        for (KaptioTravel__Itinerary__c booking : (List<KaptioTravel__Itinerary__c>) scope) {
+
+            Date createdDt = Date.newInstance(booking.CreatedDate.year(), booking.CreatedDate.month(), booking.CreatedDate.day());
+            Integer timeSpan = createdDt.daysBetween(booking.Due_Day__c); //时间间隔
+
+            if (booking.KaptioTravel__Status__c == 'Booked Deposited') {
+                if (timeSpan >= 15) {
+                    //Tony 手工延长了付款周期
+                    Date thirteenDay = booking.Due_Day__c.addDays(-2);//往前推2天，也就是标准流程的第“13”天
+                    if (Date.today() == thirteenDay) {
+
+                        SMSServiceHandler.ItineraryEntityInfo bookingData = new SMSServiceHandler.ItineraryEntityInfo();
+                        bookingData.ItineraryCreatedDate = Date.valueOf(booking.CreatedDate);
+                        bookingData.ItineraryNo = booking.KaptioTravel__Itinerary_No__c;
+                        bookingData.IsDepositted = true;
+
+                        //发送邮件给客户
+                        //mapEmailToItineraryInfo.put(booking.KaptioTravel__Account__r.PersonEmail,bookingData);
+
+                        //发送邮件销售和销售经理
+                        mapEmailToItineraryInfo.put(booking.Owner.Email, bookingData);//销售
+
+                    }
+                }
+                if (Date.today() == booking.Due_Day__c.addDays(3)) {
+
+                    //做第18天的事情，取消订单
+                    if (booking.KaptioTravel__Status__c == 'Booked Deposited') {
+                        //已经付了定金的订单
+                        booking.KaptioTravel__Status__c = 'Booked Cancelled'; //自动取消订单
+                        tobeCancelledItineraries.add(booking);
+                    }
+                }
+            }
+            if (booking.KaptioTravel__Status__c == 'New' || booking.KaptioTravel__Status__c == 'Quoted') {
+
+                Date thirdDayCreated = createdDt.addDays(3);//订单创建日期+3天- 发送短信和邮件给客户，提醒付款
+                Date eightDayCreated = createdDt.addDays(8);//订单创建日期+8天- 系统自动取未支付定金订单
+
+                if (Date.today() == thirdDayCreated) {
+                    //Due Day - 2天 也就订单创建第三天 
+                    String mobile = booking.KaptioTravel__Account__r.PersonMobilePhone;
+                    //发送短信给客户                   
+                    SMSServiceHandler.BatchSmsContent smsItem = new SMSServiceHandler.BatchSmsContent();
+                    smsItem.content = '由于预订火爆，您于 ' + String.valueOf(Date.valueOf(booking.CreatedDate)) + '预定的维京游轮行程即将取消，请及时联系您的专属行程规划师。';
+                    smsItem.mobile = mobile;
+                    smsItem.tid = mobile;
+                    smsContentsList.add(smsItem);
+
+                    SMSServiceHandler.ItineraryEntityInfo bookingData = new SMSServiceHandler.ItineraryEntityInfo();
+                    bookingData.ItineraryCreatedDate = Date.valueOf(booking.CreatedDate);
+                    bookingData.ItineraryNo = booking.KaptioTravel__Itinerary_No__c;
+                    bookingData.IsDepositted = false;
+                    //发送邮件给客户
+                    mapEmailToItineraryInfo.put(booking.KaptioTravel__Account__r.PersonEmail, bookingData);
+
+                }
+
+
+                if (Date.today() == eightDayCreated && booking.KaptioTravel__Transaction_Amount__c < 1) {
+                    //Due Day + 3 天 也就是订单创建第8天
+                    booking.KaptioTravel__Status__c = 'Lost'; //自动取消订单
+                    booking.Reason_Lost__c = 'Overdue';
+                    tobeLostItineraries.add(booking);
+                }
+            }
+
+        }//end for 
+
+        try {
+
+            if (smsContentsList.size() > 0) {
+                smsBody.items = smsContentsList;
+                smsBody.campaignID = '100501';
+                String batchSMSRecordsJson = JSON.serialize(smsBody);
+                SMSServiceHandler.smsBatchHttp(batchSMSRecordsJson);
+
+            }
+
+            if (mapEmailToItineraryInfo.size() > 0) {
+                DepositNotificationService.sendNotificationEmailAlert(mapEmailToItineraryInfo);//第"13"天发邮件通知坐席和坐席经理
+            }
+
+            if (tobeCancelledItineraries.size() > 0) {
+                update tobeCancelledItineraries; // 第"18"天取消订单
+            }
+            if (tobeLostItineraries.size() > 0) {
+                update tobeLostItineraries; // 第"8"天Lost未支付定金的订单
+            }
+
+        } catch (Exception ex) {
+
+            Callout_Log__c smsLog = new Callout_Log__c();
+            smsLog.DataBody__c = ex.getMessage();
+            smsLog.Name = 'Deposit Notification Error';
+            insert smsLog;
+        }
+
+    }
+
+    global void finish(Database.BatchableContext BC) {
+
+        //TBD
+
+    }
+}
