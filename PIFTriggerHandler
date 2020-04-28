@@ -1,0 +1,138 @@
+/*
+*  Author : Charles
+*  Date : 2018/7/10
+*  Function : update Itinerary status based on the PIF status
+*  Updated by Eric Liang on 11.15.2019, Add method checkDuplicateMobilePhone()
+*/
+
+public without sharing class PIFTriggerHandler {
+
+    /**
+     * 根据PIFMapper中的pifToPassengerMap同步更新PIF的改动到Passenger上
+     * Refactor by Eric Liang on 3.24.2020
+     * @param oldPIFs
+     * @param newPIFs
+     */
+    public static void updatePassenger(Map<Id, PIF__c> oldPIFs, Map<Id, PIF__c> newPIFs) {
+        Map<Id, PIF__c> pifToUpdatePassengerMap = new Map<Id, PIF__c>();
+        if (oldPIFs == null) {
+            pifToUpdatePassengerMap = newPIFs;
+        } else {
+            for (PIF__c newPIF : newPIFs.values()) {
+                if (Utils.fieldsChanged(oldPIFs.get(newPIF.Id), newPIF, new List<String>(PifMapper.pifToPassengerMap.keySet()))) {
+                    pifToUpdatePassengerMap.put(newPIF.Id, newPIF);
+                }
+            }
+        }
+        if (pifToUpdatePassengerMap.isEmpty()) {
+            return;
+        }
+        List<KaptioTravel__Passenger__c> passengersByIds = new Query('KaptioTravel__Passenger__c').
+                selectField('PassengerInformationForm__c').
+                selectFields(PifMapper.pifToPassengerMap.values()).
+                addConditionIn('PassengerInformationForm__c', pifToUpdatePassengerMap.keySet()).
+                run();
+        for (KaptioTravel__Passenger__c passenger : passengersByIds) {
+            if (pifToUpdatePassengerMap.get(passenger.PassengerInformationForm__c).Is_Submitted__c) {
+                continue;
+            }
+            new PifMapper(pifToUpdatePassengerMap.get(passenger.PassengerInformationForm__c), passenger).runPassenger();
+        }
+        update passengersByIds;
+    }
+
+    /**
+     * 根据PIF信息填充相关的Passenger的Person Account
+     * （1）如果PIF手机号和Itinerary的Account的手机号一样，填充为Itinerary的Account
+     * （2）如果手机号不一样，根据PIF信息新建一个Account并关联
+     * @param oldPIFs
+     * @param newPIFs
+     */
+    public static void populatePassengerAccount(Map<Id, PIF__c> oldPIFs, Map<Id, PIF__c> newPIFs) {
+        Set<Id> pifIdSet = new Set<Id>();
+        for (PIF__c pif : newPIFs.values()) {
+            //Status修改为Completed或Contract Ready
+            if ((pif.PIF_Status__c == 'Completed' || pif.PIF_Status__c == 'Contract Ready') && oldPIFs.get(pif.Id).PIF_Status__c != pif.PIF_Status__c) {
+                pifIdSet.add(pif.Id);
+            }
+        }
+        if (pifIdSet.isEmpty()) {
+            return;
+        }
+        //查询Account为空的Passenger
+        List<KaptioTravel__Passenger__c> passengers = [
+                SELECT Id,Passenger_Account__c,PassengerInformationForm__c,Itinerary_Account__c,Itinerary_Account_Passport__c,Itinerary_Primary_Account_Source__c
+                FROM KaptioTravel__Passenger__c
+                WHERE Passenger_Account__c = NULL
+                AND PassengerInformationForm__c IN :pifIdSet
+        ];
+        if (!passengers.isEmpty()) {
+            populatePassengerAccount(passengers, newPIFs, true);
+        }
+    }
+
+    /*
+    （1）手机号匹配并给Account赋值
+    （2）新建Account并关联Passenger
+    */
+    public static void populatePassengerAccount(List<KaptioTravel__Passenger__c> passengers, Map<Id, PIF__c> pifMap, Boolean updatePassenger) {
+        System.debug('***PIFTriggerHandler updatePassengerAccountId ');
+        Map<KaptioTravel__Passenger__c, Account> passengerAccountMap = new Map<KaptioTravel__Passenger__c, Account>();
+        for (KaptioTravel__Passenger__c passenger : passengers) {
+            PIF__c relatedPif = pifMap.get(passenger.PassengerInformationForm__c);
+            //if(passenger.KaptioTravel__Itinerary__r.KaptioTravel__Channel__r.Name == 'B2C' && String.isNotBlank(relatedPif.Applicant_s_Mobile__c) && relatedPif.Applicant_s_Mobile__c == passenger.KaptioTravel__Itinerary__r.KaptioTravel__Account__r.PersonMobilePhone ){
+            if (String.isNotBlank(relatedPif.Passport_Number__c) && relatedPif.Passport_Number__c == passenger.Itinerary_Account_Passport__c && passenger.Itinerary_Account__c != null) {
+                passenger.Passenger_Account__c = passenger.Itinerary_Account__c;
+            } else {
+                Account acc = new Account();
+                acc.RecordTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('PersonAccount').getRecordTypeId();
+                acc.AccountSource = passenger.Itinerary_Primary_Account_Source__c;
+                PifMapper pm = new PifMapper(relatedPif, acc);
+                pm.runPIFAccount();
+                passengerAccountMap.put(passenger, acc);
+            }
+        }
+        if (passengerAccountMap.values().size() > 0) {
+            insert passengerAccountMap.values();
+            for (KaptioTravel__Passenger__c passenger : passengerAccountMap.keySet()) {
+                passenger.Passenger_Account__c = passengerAccountMap.get(passenger).Id;
+            }
+        }
+        if (updatePassenger) {
+            update passengers;
+        }
+    }
+
+    /**
+     * 验证同一个Account下的所有PIF的手机号不能重复
+     *
+     * @param oldPIFs
+     * @param newPIFs
+     */
+//    public static void checkDuplicateMobilePhone(Map<Id, PIF__c> oldPIFs, List<PIF__c> newPIFs) {
+//        List<PIF__c> pifListToCheck = new List<PIF__c>();
+//        Set<Id> accountIdSet = new Set<Id>();
+//        for (PIF__c pif : newPIFs) {
+//            if (String.isEmpty(pif.Applicant_s_Mobile__c) || pif.Account__c == null) {
+//                continue;
+//            }
+//            if (oldPIFs == null || oldPIFs.isEmpty() || oldPIFs.get(pif.Id).Applicant_s_Mobile__c <> pif.Applicant_s_Mobile__c) {
+//                pifListToCheck.add(pif);
+//                accountIdSet.add(pif.Account__c);
+//            }
+//        }
+//        if (pifListToCheck.isEmpty()) {
+//            return;
+//        }
+//        for (PIF__c existingPIF : (List<PIF__c>) new Query('PIF__c').selectFields('Name,Account__c,Applicant_s_Mobile__c').
+//                addConditionIn('Account__c', accountIdSet).addConditionEq('Account__r.IsPersonAccount', true).orderBy('Account__c').run()) {
+//            for (PIF__c newPIF : pifListToCheck) {
+//                if (newPIF.Id != existingPIF.Id &&
+//                        newPIF.Account__c == existingPIF.Account__c &&
+//                        newPIF.Applicant_s_Mobile__c == existingPIF.Applicant_s_Mobile__c) {
+//                    newPIF.addError('您填写的手机号与' + existingPIF.Name + '重复，请使用另一个手机号码！');
+//                }
+//            }
+//        }
+//    }
+}
