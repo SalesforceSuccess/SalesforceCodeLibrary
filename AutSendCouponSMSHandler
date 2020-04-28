@@ -1,0 +1,144 @@
+public with sharing class AutSendCouponSMSHandler {
+    /*
+    @future(callout = true)
+    public static void SendCouponSMSAutoActive(List<String> couponId)
+    {
+      if(!couponId.isEmpty() && couponId.size()>0)
+      {
+        List<Coupon__c> couponArray = new List<Coupon__c>();
+        couponArray = [Select Id,Name,Coupon_Status__c,Owner_Name__c,Coupon_Code__c,SMS_Send__c,RelatedAccount__r.PersonMobilePhone,RelatedPassenger__r.Contact_Number__c,RelatedLead__r.MobilePhone From Coupon__c Where Id in: couponId];
+        
+        for(Coupon__c coupon : couponArray)
+        {
+          SendSMS(coupon);
+        }
+
+      }
+    
+    }
+    public static void SendSMS(Coupon__c coupon)
+    {
+      List<String> smsParamters = new List<String>();
+      smsParamters.add(coupon.Owner_Name__c);
+      smsParamters.add(coupon.Name);
+      smsParamters.add(coupon.Coupon_Code__c);
+
+      List<String> dispatchMobile = new List<String>();
+      dispatchMobile.add(coupon.RelatedAccount__r.PersonMobilePhone);
+      dispatchMobile.add(coupon.RelatedLead__r.MobilePhone);
+      dispatchMobile.add(coupon.RelatedPassenger__r.Contact_Number__c);
+
+
+      String smsTemplate  = '尊敬的{0}，恭喜您获得{1}，优惠券券号：{2}。欢迎致电400-6666-927或联系您的行程规划师享用优惠，使用时请提供您的优惠券券号，谢谢！退订TD';
+      SMSContent smsC = new SMSContent();
+      for(Integer sequence = 0; sequence<3;sequence++)
+      {
+        smsC.mobile = dispatchMobile[sequence];
+        if(String.isNotEmpty(smsC.mobile)&&String.isNotBlank(smsC.mobile))
+        {
+          break;
+        }
+      }
+      smsC.content = String.format(smsTemplate, smsParamters);
+
+
+      if(coupon.SMS_Send__c == true || (coupon.Coupon_Status__c != 'Active'))
+      {
+        if(coupon.SMS_Send__c == true && coupon.Coupon_Status__c == 'Active' )
+        {
+          CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,'失败','优惠券短信已发送，且每张优惠券仅能发送一条短信，请勿重复发送',coupon.Id);
+        }
+        if(coupon.Coupon_Status__c != 'Active' && coupon.SMS_Send__c == false)
+        {
+          CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,'失败','优惠券状态为待使用时才能发送短信，请确认是否已经提交发券申请',coupon.Id);
+        }
+        if(coupon.SMS_Send__c == true && (coupon.Coupon_Status__c != 'Active'))
+        {
+          CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,'失败','1.优惠券短信已发送，且每张优惠券仅能发送一条短信，请勿重复发送; 2.优惠券状态为待使用时才能发送短信，请确认是否已经提交发券申请',coupon.Id);
+        }
+      }
+
+
+      smsC.campaignID = '100501';
+      String json  = JSON.serialize(smsC);
+      HttpRequest req = new HttpRequest(); 
+    req.setMethod('POST');
+    String userName = 'daisy.yu@vikingcruises.cn';
+    String passWord = 'Webp0wer';
+    String auth = 'Basic ' + EncodingUtil.base64Encode(Blob.valueOf(userName+':'+passWord));
+    req.setHeader('Authorization', auth);
+    req.setEndpoint('https://sms.dmacloud.com/rest/v2/single_sms');
+    req.setHeader('Content-Type', 'application/json');
+    String body = json;
+    req.setBody(body);
+
+    Http http = new Http();
+    try
+    {
+      if(smsC.mobile.length() == 11)
+      {
+        HTTPResponse res = http.send(req);
+
+        Map<String,Object> jsonResults =(Map<String,Object>)System.JSON.deserializeUntyped(res.getBody());
+
+        if(String.valueOf(jsonResults.get('status')) == 'OK')
+        {  
+          //发送成功
+          coupon.SMS_Send__c = true;
+          update coupon;
+        }
+        else
+        {
+          //发送失败
+          coupon.SMS_Send__c = false;
+          update coupon;
+        }
+        CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,String.valueOf(jsonResults.get('status')),'',coupon.Id);
+        RecordLog('返回结果:'+res.getBody()+'-----短信内容：'+smsC.content);
+      }
+      else
+      {
+        coupon.SMS_Send__c = false;
+        update coupon;
+        //手机不合法
+        CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,'未发送','手机格式不对',coupon.Id);
+      }
+
+    }
+    catch(Exception ex)
+    {  coupon.SMS_Send__c = false;
+      update coupon;
+      CreateSMSSendHistory(smsC.mobile,coupon.Owner_Name__c,smsC.content,'发生错误',ex.getMessage(),coupon.Id);
+      //record the error log here
+      RecordLog(ex.getMessage());
+    }
+    }*/
+
+    public static void RecordLog(String logContent)
+    {
+      Callout_Log__c smsLog  = new Callout_Log__c();
+      smsLog.Name = 'Coupon SMS Log';
+      smsLog.DataBody__c = logContent;
+      insert smsLog;
+
+    }
+
+    public static void CreateSMSSendHistory(String mobile,String ownerName,String smsContent,String status,String descInfo,String couponId)
+    {
+      Coupon_SMS_History__c history = new Coupon_SMS_History__c();
+      history.Name = mobile;
+      history.To_Who__c = ownerName;
+      history.SMS_Content__c = smsContent; 
+      history.Description__c = descInfo;
+      history.Coupon__c = couponId;
+      history.Status__c = status;
+      upsert history;
+    }
+    public Class SMSContent
+    {
+      public String mobile {get;set;}
+      public String content{get;set;}
+      public String campaignID {get;set;}
+        public String realUrl{get;set;}
+    }
+}
