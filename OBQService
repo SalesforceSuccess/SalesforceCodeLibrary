@@ -1,0 +1,190 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/3/16
+ * @Version 1.0
+ **/
+
+public with sharing class OBQService {
+    /*
+    * Description: 接收OBQ传给SF的Json数据，解析到SF SurveyForce数据结构中
+    * */
+    public static void parseOBQData(String json) {
+
+        List<OBQEntity> obqData = ConvertOBQJsonToEntity(json);
+        if (obqData.size() > 0) {
+            ConvertOBQIntoSurveyForce(obqData);
+        }
+    }
+
+    private static void ConvertOBQIntoSurveyForce(List<OBQEntity> surveys) {
+
+        Map<String, KaptioTravel__Passenger__c> mapPaxNoKaptioTravelPassenger = new Map<String, KaptioTravel__Passenger__c>();
+        Map<String, Survey_Question__c> mapExternalIdSurveyQuestion = new Map<String, Survey_Question__c>();
+        Set<String> paxNos = new Set<String>();
+        Set<String> surveyExternalId = new Set<String>();
+        Set<String> questionExternalId = new Set<String>();
+        for (OBQEntity mxpItem : surveys) {
+            paxNos.add(mxpItem.PaxNo); //乘客编号
+            surveyExternalId.add(mxpItem.SurveyExternalId); //问卷Id
+            for (OBQResponse obqr : mxpItem.Responses) {
+                questionExternalId.add(obqr.QuestionExternalId); //问题Id
+            }
+        }
+        //根据乘客编号，返回乘客信息
+        for (KaptioTravel__Passenger__c pax : [SELECT Id,Name FROM KaptioTravel__Passenger__c WHERE Name IN:paxNos]) {
+            mapPaxNoKaptioTravelPassenger.put(pax.Name, pax); //乘客
+        }
+        //根据问卷问题外部Id,返回问卷问题信息
+        for (Survey_Question__c sQuestion : [SELECT Id,ExternalId__c FROM Survey_Question__c WHERE ExternalId__c IN:questionExternalId]) {
+            mapExternalIdSurveyQuestion.put(sQuestion.ExternalId__c, sQuestion); //问题
+        }
+        //根据问卷外部Id,返回问卷信息
+        Map<String, Survey__c> mapSurveyExternalIdSurvey = new Map<String, Survey__c>();
+        for (Survey__c sItem : [SELECT Id,External_Id__c FROM Survey__c WHERE External_Id__c IN:surveyExternalId]) {
+            mapSurveyExternalIdSurvey.put(sItem.External_Id__c, sItem); //问卷
+        }
+
+        Map<String, List<OBQResponse>> paxSurveyResponses = new Map<String, List<OBQResponse>>();
+        List<SurveyTaken__c> tobeAddedTaken = new List<SurveyTaken__c>();
+        Map<String, SurveyTaken__c> mapPaxNoTaken = new Map<String, SurveyTaken__c>();
+        for (OBQEntity mxpItem : surveys) {
+            //Step 1: 构建Token.(填充Passenger Id)
+            SurveyTaken__c surveyTaken = new SurveyTaken__c();
+            surveyTaken.Passenger__c = mapPaxNoKaptioTravelPassenger.get(mxpItem.PaxNo).Id;
+            surveyTaken.Survey__c = mapSurveyExternalIdSurvey.get(mxpItem.SurveyExternalId).Id;
+            tobeAddedTaken.add(surveyTaken);
+            paxSurveyResponses.put(mxpItem.PaxNo, mxpItem.Responses); //根据乘客编号，映射乘客针对问卷的所有响应.
+        }
+        if (tobeAddedTaken.size() > 0) {
+            insert tobeAddedTaken;
+        }
+
+        //构建Choice
+        List<Survey_Question_Choice__c> tobeAddedChoices = new List<Survey_Question_Choice__c>();
+        Map<String, Survey_Question_Choice__c> mapExternalIdToChoice = new Map<String, Survey_Question_Choice__c>();
+        for (OBQEntity obqDataItem : surveys) {
+
+            for (OBQResponse res : paxSurveyResponses.get(obqDataItem.PaxNo)) {
+
+                Survey_Question_Choice__c surveyChoice = new Survey_Question_Choice__c();
+                if (res.AnswerComment != null) {
+                    surveyChoice.Choice__c = res.AnswerComment;
+                }
+                if (res.AnswerExternalId != null) {
+                    surveyChoice.ExternalId__c = res.AnswerExternalId;
+                    mapExternalIdToChoice.put(res.AnswerExternalId, surveyChoice);
+                }
+
+                surveyChoice.SurveyQuestion__c = mapExternalIdSurveyQuestion.get(res.QuestionExternalId).Id;
+                tobeAddedChoices.add(surveyChoice);
+            }
+
+        }
+        if (tobeAddedChoices.size() > 0) {
+            insert tobeAddedChoices;
+        }
+
+        //构建Question Response
+        List<SurveyQuestionResponse__c> tobeAddedSurveyQusRes = new List<SurveyQuestionResponse__c>();
+        for (OBQEntity obqResponse : surveys) {
+
+            for (OBQResponse res : paxSurveyResponses.get(obqResponse.PaxNo)) {
+                SurveyQuestionResponse__c sqr = new SurveyQuestionResponse__c();
+                sqr.Survey_Question__c = mapExternalIdSurveyQuestion.get(res.QuestionExternalId).Id;
+                //sqr.SurveyTaker__c = ;
+                if (res.AnswerExternalId != null) {
+                    sqr.SurveyQuestionChoice__c = mapExternalIdToChoice.get(res.AnswerExternalId).Id;
+                }
+                if (res.AnswerComment != null) {
+                    sqr.Response__c = res.AnswerComment;
+                }
+                tobeAddedSurveyQusRes.add(sqr);
+            }
+
+        }
+        if (tobeAddedSurveyQusRes.size() > 0) {
+            insert tobeAddedSurveyQusRes;
+        }
+    }
+
+    private static List<OBQEntity> ConvertOBQJsonToEntity(String jsonStr) {
+        List<OBQEntity> tobeUpdates = new List<OBQEntity>();
+        Map<String, Object> m = (Map<String, Object>) System.JSON.deserializeUntyped(jsonStr);
+        String typeSurvey = (String) m.get('type');
+        String sourceSurvey = (String) m.get('source');
+        List<Object> surveyData = (List<Object>) m.get('items'); //数据部分
+        for (Object obj : surveyData) {
+            Map<String, Object> mapValues = (Map<String, Object>) obj;
+            Object objTarget = (Object) mapValues.get('data'); //包含乘客，提交时间，问卷Id, 问卷的问题相应以及答案反馈
+            OBQEntity obqItem = new OBQEntity();
+            obqItem.Action = (String) mapValues.get('action');
+            Map<String, Object> objMapValues = (Map<String, Object>) objTarget;
+            obqItem.SurveyExternalId = String.valueOf(objMapValues.get('survey_external_id'));//Survey External Id
+            obqItem.PaxNo = String.valueOf(objMapValues.get('passenger_number')); //乘客编号
+            obqItem.SubmitDate = Datetime.valueOf(objMapValues.get('submit_datetime'));//提交时间
+            List<Object> surveyResponses = (List<Object>) objMapValues.get('responses');
+            List<OBQResponse> obqEntityResponse = new List<OBQResponse>();
+            for (Object surveyResponse : surveyResponses) {
+                OBQResponse obqRes = new OBQResponse();
+                Map<String, Object> responseValue = (Map<String, Object>) surveyResponse;
+                obqRes.QuestionExternalId = String.valueOf(responseValue.get('questionnaire_external_id')); //问卷Id
+                if (String.valueOf(responseValue.get('answer_external_id')) != null) {
+                    obqRes.IfTextQuestion = false;
+                    obqRes.AnswerExternalId = String.valueOf(responseValue.get('answer_external_id')); //答案Id
+                }
+                if (String.valueOf(responseValue.get('response_text')) != null) {
+                    obqRes.IfTextQuestion = true;
+                    obqRes.AnswerComment = String.valueOf(responseValue.get('response_text')); //文本问题
+                }
+                obqEntityResponse.add(obqRes);
+            }
+            obqItem.Responses = obqEntityResponse;
+        }
+        return tobeUpdates;
+    }
+
+    public class SurveyResponse {
+        public String QuestionExternalId { get; set; }
+        public String AnswerChoiceExternalId { get; set; }
+    }
+
+    public class Survey {
+        public String Head { get; set; }
+        public String ThanksText { get; set; }
+        public String Url { get; set; }
+        public String ExternalId { get; set; }
+    }
+
+    public class SurveyQuestion {
+        public String Question { get; set; }
+        public String Survey { get; set; }
+        public String ExternalId { get; set; }
+
+    }
+    public class SurveyTaker {
+        public Survey Survey { get; set; }
+        public String Taken { get; set; }
+    }
+    public class SurveyQuestionResponse {
+        public String Response { get; set; }
+        public SurveyQuestion Question { get; set; }
+        public SurveyTaker Submitter { get; set; }
+        public Integer TimeOfQuestionResponse { get; set; }
+    }
+
+    public class OBQEntity {
+        public String Action { get; set; }
+        public String PaxNo { get; set; }
+        public Datetime SubmitDate { get; set; }
+        public String SurveyExternalId { get; set; }
+        public List<OBQResponse> Responses { get; set; }
+    }
+
+    public class OBQResponse {
+        public String QuestionExternalId { get; set; }
+        public String AnswerExternalId { get; set; }
+        public String AnswerComment { get; set; }
+        public Boolean IfTextQuestion { get; set; }
+    }
+}//
