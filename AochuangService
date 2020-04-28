@@ -1,0 +1,44 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/4/27
+ * @Version 1.0
+ **/
+
+public class AochuangService {
+
+    private static String SIGN_KEY = 'B01A33B5-66EA-4F13-9EF9-DB64D3BF7CC9';
+    private static String ACCOUNT_SECRET = '5da5c07bdaa24d17a52412d53731ea2e';
+    private static String EndPoint = 'https://ac.vikingcruises.cn:9991';
+
+    public static void getListCallRecord(){
+
+        Long timeStamp = Datetime.now().getTime();
+        AochuangServiceHelper.ListCallRecordApiHttpBody bodyContent = new AochuangServiceHelper.ListCallRecordApiHttpBody(2,1,ACCOUNT_SECRET);
+        String connectAuthStr = Json.serialize(bodyContent)+ String.valueOf(timestamp) + SIGN_KEY;
+        String signature = EncodingUtil.convertToHex(Crypto.generateDigest('SHA1',Blob.valueOf(connectAuthStr)));
+        HttpRequest req = new HttpRequest();
+        req.setMethod('POST');
+        req.setEndpoint(EndPoint + '/api/ThirdParty/listCallRecord');
+        req.setHeader('Content-Type', 'application/json');
+        req.setHeader('Timestamp', String.valueOf(timeStamp));
+        req.setHeader('Signature', signature);
+        req.SetBody(Json.serialize(bodyContent));
+        req.setTimeout(1200);
+        Http http = new Http();
+        try{
+            HTTPResponse res = http.send(req);
+            Map<String,Object> resultsMap = (Map<String,Object>)Json.deserializeUntyped(res.getBody());
+            //总记录数
+            Integer totalNum = Integer.valueOf(resultsMap.get('total'));
+            //通话记录集合
+            List<Object> results = (List<Object>)resultsMap.get('results');
+            if(results != null && results.size() > 0){
+                AochuangServiceHelper.aochuangResponseToCallCenterBasicDataMapping(results);
+            }
+        }
+        catch (Exception ex){
+            AochuangServiceHelper.RecordCalloutLog('Call getListCallRecord API Errors',ex.getMessage());
+        }
+    }
+}
