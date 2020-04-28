@@ -1,0 +1,240 @@
+public with sharing class CouponGeneratorHandler {
+
+
+
+    public ApexPages.StandardController stdController;
+    public CouponGeneratorHandler(ApexPages.StandardController standardController)
+    {
+        this.stdController = standardController;
+    }
+
+    public PageReference callWebGeneratedCouponPDF()
+    {
+        String pdfPageLink = '';
+        String couponId = stdController.getId();
+        String pushData = generateCouponJson(couponId);
+
+        
+        String results  = CalloutECoupon(pushData);
+
+        Map<String,Object> mapResults =(Map<String,Object>)System.JSON.deserializeUntyped(results);
+
+
+        System.debug('结果：'+ mapResults);
+
+        Map<String,Object> objData =(Map<String,Object>)mapResults.get('data');
+        
+        if(objData != null)
+        {   
+            
+            Coupon__c couponUpdated = (Coupon__c)stdController.getRecord();
+            couponUpdated.CouponPdfLink__c =String.valueOf(objData.get('url'));
+            pdfPageLink = String.valueOf(objData.get('url'));
+            update couponUpdated;
+            RecordCouponEmailLog(pushData,results);
+            
+            Callout_Log__c pifLog  = new Callout_Log__c();
+            pifLog.Name = 'E-Coupon Json Data';
+            pifLog.DataBody__c = JSON.serialize(pushData).left(131072);
+            insert pifLog;
+        }
+
+
+        
+        PageReference pageRef = new PageReference(pdfPageLink);
+        pageRef.setRedirect(true);
+        return pageRef; 
+    }
+
+    public static String CalloutECoupon(String dataJson)
+    {
+        HttpRequest req = new HttpRequest(); 
+        req.setMethod('POST');
+        req.setHeader('Authorization', 'Keypair key=d46cb0e7-493b-411e-8627-22abf36b9345 secret=a09eca10-600a-4dfb-84ad-6b7e72966cf6');
+        req.setEndpoint('http://api.staging.vikingcruises.cn/pdf/coupon/');
+        req.setHeader('Content-Type', 'application/json');
+        req.setTimeout(60000);
+        
+        String couponJsonData = dataJson;
+        String body = couponJsonData;
+        req.setBody(body);
+        Http http = new Http();
+        HTTPResponse res = http.send(req);
+        return res.getBody();
+    }
+
+    
+    
+    public static String generateCouponJson(String couponId)
+    {
+        String outputCoupon = '';
+                
+        Coupon__c couponSelected = [Select Id,Name,UsedAmount__c,Coupon_Code__c,Is_Active__c,Effective_Date__c,Channel__c,Qualification__c,Coupon_Status__c,Coupon_Type__c,OfferValueNew__c,Coupon_code_in_MXP__c,
+                                    Redeem_Rule__c,Offer_Description__c,Owner_Name__c,Used_Itinerary__c,TA_Account__c,CustomCurrency__c,RelatedPassenger__r.CabinAllocation__r.Name,
+                                    Coupon_Template__r.Name,Used_Itinerary__r.Sailing__r.CruiseItinerary__r.ExternalName__c,RelatedPassenger__c,RelatedPassenger__r.KaptioTravel__Itinerary__c,
+                                    RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.CruiseItinerary__r.ExternalName__c,RelatedAccount__c,RelatedAccount__r.Name,RelatedAccount__r.LastName,RelatedAccount__r.FirstName,
+                                    RelatedPassenger__r.KaptioTravel__Itinerary__r.Name,RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Name,RelatedPassenger__r.KaptioTravel__Itinerary__r.SailingDate__c,RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Ship__r.Name,RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Ship__r.Ship_Chinese_Name__c,
+                                    Used_Itinerary__r.Name,Used_Itinerary__r.Sailing__r.Name,Used_Itinerary__r.SailingDate__c,Used_Itinerary__r.Sailing__r.Ship__r.Name,Used_Itinerary__r.Sailing__r.Ship__r.Ship_Chinese_Name__c,
+                                    B2BRelatedSailing__c,B2BRelatedSailing__r.Name,B2BRelatedSailing__r.Ship__r.Ship_Chinese_Name__c,B2BRelatedSailing__r.Ship__r.Name,B2BRelatedSailing__r.DepartureDate__c,B2BRelatedSailing__r.CruiseRouteVariation__r.Cruise_Route_Variation_Name_Chinese__c,
+                                    B2BRelatedSailing__r.CruiseItinerary__r.ExternalName__c,Expired_Date__c,Application__c,Offer_Type__c,CouponSubType__c
+                                    From Coupon__c Where Id=: couponId][0];
+        if(couponSelected != null)
+        {
+            
+            VikingECoupon eCoupon = new VikingECoupon();
+            eCoupon.Name = couponSelected.Name;
+            eCoupon.CouponType = couponSelected.Coupon_Type__c;
+            eCoupon.CouponCode = couponSelected.Coupon_Code__c;
+            eCoupon.IsActive = couponSelected.Is_Active__c;
+            eCoupon.Channel = couponSelected.Channel__c;
+            eCoupon.EffectiveDate = couponSelected.Effective_Date__c;
+            eCoupon.ExpiredDate = couponSelected.Expired_Date__c;
+            eCoupon.RedeemRule = couponSelected.Redeem_Rule__c;
+            eCoupon.OfferDesc = couponSelected.Offer_Description__c;
+            eCoupon.OwnerName = couponSelected.Owner_Name__c;
+            eCoupon.OfferValue = couponSelected.OfferValueNew__c;
+            eCoupon.CurrencyCode = couponSelected.CustomCurrency__c;
+            eCoupon.UsedAmount = couponSelected.UsedAmount__c;
+            eCoupon.PassengerCabinNumber = couponSelected.RelatedPassenger__r.CabinAllocation__r.Name;
+            eCoupon.TAAccount = couponSelected.TA_Account__c;
+            eCoupon.Application = couponSelected.Application__c;
+            eCoupon.MxpCouponCode = couponSelected.Coupon_code_in_MXP__c;
+            eCoupon.OfferType = couponSelected.Offer_Type__c;
+            eCoupon.CouponSubType = couponSelected.CouponSubType__c;
+            if(couponSelected.RelatedAccount__c <> null)
+            {
+                eCoupon.RelatedAccount = couponSelected.RelatedAccount__r.Name;
+            }
+
+            if(couponSelected.Coupon_Type__c == 'FCC')
+            {
+                eCoupon.TemplateCode = 'FCC';
+            }
+            else if(couponSelected.Coupon_Type__c == 'OCV')
+            {
+                eCoupon.TemplateCode = 'OCV';
+                
+            }
+            else if(couponSelected.Coupon_Type__c == 'FCD')
+            {
+                eCoupon.TemplateCode = 'FCD';
+            }
+            else if(couponSelected.Coupon_Type__c== 'CTG')
+            {
+                eCoupon.TemplateCode = 'CTG';
+            }
+            Sailing sailingInfo = new Sailing();
+            sailingInfo.Name = couponSelected.Used_Itinerary__r.Sailing__r.Name;
+            sailingInfo.SailDate = couponSelected.Used_Itinerary__r.SailingDate__c;
+            sailingInfo.ShipName = couponSelected.Used_Itinerary__r.Sailing__r.Ship__r.Name;
+            sailingInfo.ShipNameCn = couponSelected.Used_Itinerary__r.Sailing__r.Ship__r.Ship_Chinese_Name__c;
+            sailingInfo.CruiseRouteName = couponSelected.Used_Itinerary__r.Sailing__r.CruiseItinerary__r.ExternalName__c;
+
+            eCoupon.CouponSailing = sailingInfo;
+
+
+            if(couponSelected.RelatedPassenger__c != null)
+            {
+                PassengerRelatedSailing paxSailing  = new PassengerRelatedSailing();
+                paxSailing.Name = couponSelected.RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Name;
+                paxSailing.SailDate = couponSelected.RelatedPassenger__r.KaptioTravel__Itinerary__r.SailingDate__c;
+                paxSailing.ShipName = couponSelected.RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Ship__r.Name;
+                paxSailing.ShipNameCn = couponSelected.RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.Ship__r.Ship_Chinese_Name__c;
+                paxSailing.CruiseRouteName = couponSelected.RelatedPassenger__r.KaptioTravel__Itinerary__r.Sailing__r.CruiseItinerary__r.ExternalName__c;
+                eCoupon.PaxRelatedSailing  = paxSailing;
+            }
+            if(couponSelected.B2BRelatedSailing__c != null)
+            {
+                B2BRelatedSailing  taSailing = new B2BRelatedSailing();
+                taSailing.Name = couponSelected.B2BRelatedSailing__r.Name;
+                taSailing.SailDate = couponSelected.B2BRelatedSailing__r.DepartureDate__c;
+                taSailing.ShipName = couponSelected.B2BRelatedSailing__r.Ship__r.Name;
+                taSailing.ShipNameCn = couponSelected.B2BRelatedSailing__r.Ship__r.Ship_Chinese_Name__c;
+                taSailing.CruiseRouteName = couponSelected.B2BRelatedSailing__r.CruiseRouteVariation__r.Cruise_Route_Variation_Name_Chinese__c;
+                eCoupon.B2BTASailing = taSailing;
+            }
+
+            outputCoupon = JSON.serialize(eCoupon);
+
+            
+        }
+        else
+        {
+            Callout_Log__c pifLog  = new Callout_Log__c();
+            pifLog.Name = 'No Data-E-Coupon Json Data';
+            pifLog.DataBody__c = '无符合条件数据';
+            insert pifLog;
+        }
+            
+
+
+        return outputCoupon;
+    }
+        public void RecordCouponEmailLog(String pushData,String returnResults)
+    {
+        CouponEmailLog__c couponEmailLog = new CouponEmailLog__c();
+        couponEmailLog.Send_Data_Description__c = pushData.left(131072);
+        couponEmailLog.Return_Results__c = returnResults.left(131072);
+        couponEmailLog.Coupon__c = this.stdController.getId();
+        insert couponEmailLog;
+    }
+
+    public class VikingECoupon
+    {
+        public String Name{get;set;}//优惠券名称
+        public String CouponType{get;set;}//优惠券类型
+        public String CouponSubType{get;set;}//优惠券子类型
+        public String CouponCode{get;set;}//优惠券代码
+        public Boolean IsActive{get;set;}//是否可用
+        public String Channel{get;set;}//渠道
+        public Date EffectiveDate {get;set;}//生效日期
+        public String RedeemRule{get;set;}//核销规则
+        public String OfferDesc{get;set;}//
+        public String OwnerName{get;set;} //入住客人姓名
+        public String OfferValue{get;set;} //
+        public Sailing CouponSailing{get;set;} //航线名称
+        public String CurrencyCode; //币种
+        public String TemplateCode{get;set;} //FCC-B2B(FCC B2B未来航次代金券)，FCC-B2C(FCC B2C未来航次代金券), OEV
+        public String UsedAmount{get;set;} //抵扣金额
+        public String PassengerCabinNumber{get;set;} //如果有房间号就显示，没有就为空
+        public String TAAccount{get;set;}//旅行社名称
+        public PassengerRelatedSailing PaxRelatedSailing{get;set;} //Passenger Related Sailing
+        public B2BRelatedSailing B2BTASailing{get;set;} //旅行社航次
+        public String RelatedAccount{get;set;}
+        public Date ExpiredDate{get;set;}
+        public String Application{get;set;}
+        public String MxpCouponCode{get;set;} // MXP Coupon Code
+        public String OfferType {get;set;}
+       
+
+    }
+    public class Sailing
+    {
+        public String Name{get;set;}
+        public String CruiseRouteName{get;set;}
+        public Date SailDate{get;set;} //航线出发日期
+        public String ShipName{get;set;}//
+        public String ShipNameCn{get;set;}
+    }
+    public class PassengerRelatedSailing
+    {
+        public String Name{get;set;}
+        public String CruiseRouteName{get;set;}
+        public Date SailDate{get;set;} //航线出发日期
+        public String ShipName{get;set;}//
+        public String ShipNameCn{get;set;}
+    }
+    public class B2BRelatedSailing
+    {
+        public String Name{get;set;}
+        public String CruiseRouteName{get;set;}
+        public Date SailDate{get;set;} //航线出发日期
+        public String ShipName{get;set;}//
+        public String ShipNameCn{get;set;}
+    }
+    public class Itinerary
+    {
+        public String CabinType{get;set;}
+    }
+    
+}
