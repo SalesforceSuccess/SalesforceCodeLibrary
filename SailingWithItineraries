@@ -1,0 +1,114 @@
+/*
+* This class is used for the page : SailingWithItinerary
+*/
+public with sharing class SailingWithItineraries {
+    
+    public final Sailing__c targetSailing{get;set;}
+    private ApexPages.StandardController stdController;
+    public List<KaptioTravel__Itinerary__c> sailingItineraries{get;set;}
+    public List<Wrapper> wrapperItineraries{get;set;}
+    public List<KaptioTravel__Itinerary__c> processedItinerary{get;set;}
+    public List<SelectOption> manifestGuestGroup{get;set;}
+    public String selectedGuestGroup{get;set;}
+
+    public SailingWithItineraries(ApexPages.StandardController stdController)
+    {
+      this.stdController = stdController;
+       
+      this.targetSailing = [Select Id,Name From Sailing__c Where id =: ((Sailing__c)this.stdController.getRecord()).Id];
+
+      this.sailingItineraries = [Select Id,Name,Manifest_Guest_Group__c,Owner.Name,KaptioTravel__Itinerary_No__c,KaptioTravel__BookingNumber__c,CabinsBooked__c,KaptioTravel__Close_Date__c,KaptioTravel__Channel__r.Name,Panda__r.Name,KaptioTravel__Status__c,KaptioTravel__Account__r.Name,Sailing__r.Name From KaptioTravel__Itinerary__c where Sailing__c =: this.targetSailing.Id AND(KaptioTravel__Status__c = 'Booked Confirmed' or KaptioTravel__Status__c = 'Booked Deposited') Order by CabinsBooked__c desc];
+      
+      if(wrapperItineraries == null)
+      {
+        wrapperItineraries = new List<Wrapper>();
+      }
+      for(KaptioTravel__Itinerary__c item : this.sailingItineraries)
+      {
+        Wrapper  itinerary = new Wrapper(item,false);
+        wrapperItineraries.add(itinerary);
+      }
+
+      manifestGuestGroup = new List<SelectOption>();
+      manifestGuestGroup.add(new SelectOption('Staff','Staff'));
+      manifestGuestGroup.add(new SelectOption('Group 01','Group 01'));
+      manifestGuestGroup.add(new SelectOption('Group 02','Group 02'));
+      manifestGuestGroup.add(new SelectOption('Group 03','Group 03'));
+      manifestGuestGroup.add(new SelectOption('Group 04','Group 04'));
+      manifestGuestGroup.add(new SelectOption('Group 05','Group 05'));
+      manifestGuestGroup.add(new SelectOption('Group 06','Group 06'));
+      manifestGuestGroup.add(new SelectOption('Group 07','Group 07'));
+      manifestGuestGroup.add(new SelectOption('Group 08','Group 08'));
+      manifestGuestGroup.add(new SelectOption('Group 09','Group 09'));
+      manifestGuestGroup.add(new SelectOption('Group 10','Group 10'));
+      manifestGuestGroup.add(new SelectOption('Group 11','Group 11'));
+      manifestGuestGroup.add(new SelectOption('Group 12','Group 12'));
+      manifestGuestGroup.add(new SelectOption('Group 13','Group 13'));
+      manifestGuestGroup.add(new SelectOption('Group 14','Group 14'));
+      manifestGuestGroup.add(new SelectOption('Group 15','Group 15'));
+      manifestGuestGroup.add(new SelectOption('Group 16','Group 16'));
+      manifestGuestGroup.add(new SelectOption('Group 17','Group 17'));
+      manifestGuestGroup.add(new SelectOption('Group 18','Group 18'));
+      manifestGuestGroup.add(new SelectOption('Group 19','Group 19'));
+      manifestGuestGroup.add(new SelectOption('Group 20','Group 20'));
+      manifestGuestGroup.add(new SelectOption('Group 21','Group 21'));
+      manifestGuestGroup.add(new SelectOption('Group 22','Group 22'));
+      manifestGuestGroup.add(new SelectOption('Group 23','Group 23'));
+      manifestGuestGroup.add(new SelectOption('Group 24','Group 24'));
+      manifestGuestGroup.add(new SelectOption('Group 25','Group 25'));
+
+      System.debug('页面初始化加载');
+    }
+
+    //The save action 
+    public PageReference Save()
+    {  
+      processedItinerary = new List<KaptioTravel__Itinerary__c>();
+      for(Wrapper item : wrapperItineraries)
+      {  
+        if(item.selected == true)
+        {
+          KaptioTravel__Itinerary__c selectedItinerary = new KaptioTravel__Itinerary__c();
+          selectedItinerary = item.booking;
+          selectedItinerary.Manifest_Guest_Group__c = selectedGuestGroup;
+          processedItinerary.add(selectedItinerary);
+        }
+      }
+      System.debug('符合条件的订单数量:'+processedItinerary.size());
+
+      if(processedItinerary.size() < 1)
+      {
+        ApexPages.addMessage(New ApexPages.Message(ApexPages.Severity.WARNING,'Please Select an Itinerary to Processed'));
+        return null;
+      }
+
+      if(processedItinerary.size() > 0)
+      {
+        update processedItinerary;
+      }
+
+      PageReference sailingPage = new PageReference('/apex/SailingWithItinerary?id='+ this.stdController.getId());
+      sailingPage.setRedirect(true);
+      return sailingPage;
+
+    }
+
+    public PageReference Cancel()
+    {
+      PageReference sailingPage = new PageReference('/'+ this.stdController.getId());
+      sailingPage.setRedirect(true);
+      return sailingPage;
+    }
+
+    public class Wrapper
+    {
+      public KaptioTravel__Itinerary__c booking{get;set;}
+      public Boolean selected{get;set;}
+      public Wrapper(KaptioTravel__Itinerary__c booking, Boolean checked)
+      {
+        this.booking = booking;
+        this.selected = checked;
+      }
+    }
+
+}
