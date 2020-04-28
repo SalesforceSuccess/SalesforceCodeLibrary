@@ -1,0 +1,58 @@
+public with sharing class CouponItemTriggerHandler {
+
+    public static void UpdateCouponStatus(Map<Id, Coupon_Template__c> oldCouponMap, Map<Id, Coupon_Template__c> newCouponMap) {
+        List<String> fieldsChangeString = new List<String>{
+                'Offer_Description__c', 'Redeem_Rule__c', 'Coupon_Type__c'
+        };
+        Set<Id> couponTemplateIdToFilterSet = new Set<Id>();
+        for (Coupon_Template__c newCouponTemplate : newCouponMap.values()) {
+            if (Utils.fieldsChanged(oldCouponMap.get(newCouponTemplate.Id), newCouponTemplate, fieldsChangeString)) {
+                couponTemplateIdToFilterSet.add(newCouponTemplate.Id);
+            }
+        }
+        if (couponTemplateIdToFilterSet.isEmpty()) {
+            return;
+        }
+        List<Coupon__c> couponToUpdateList = new List<Coupon__c>();
+        for (Coupon__c coupon : [
+                SELECT Id,Coupon_Template__c,Offer_Description__c,Redeem_Rule__c,Coupon_Type__c
+                FROM Coupon__c
+                WHERE Coupon_Template__c IN:newCouponMap.keySet()
+        ]) {
+            coupon.Offer_Description__c = newCouponMap.get(coupon.Coupon_Template__c).Offer_Description__c;
+            coupon.Redeem_Rule__c = newCouponMap.get(coupon.Coupon_Template__c).Redeem_Rule__c;
+            coupon.Coupon_Type__c = newCouponMap.get(coupon.Coupon_Template__c).Coupon_Type__c;
+            couponToUpdateList.add(coupon);
+        }
+        if (couponToUpdateList.size() > 0) {
+            update couponToUpdateList;
+        }
+    }
+
+    public static void syncToMQ(Map<Id, Coupon_Template__c> oldCouponTemplateMap, Map<Id, Coupon_Template__c> newCouponTemplateMap, String action) {
+        Map<Id, Coupon_Template__c> syncCouponTemplateMap = new Map<Id, Coupon_Template__c>();
+        if (oldCouponTemplateMap == null || oldCouponTemplateMap.isEmpty()) {
+            syncCouponTemplateMap = newCouponTemplateMap;
+        } else {
+            List<String> fieldsChangeString = new List<String>{
+                    'PromotionCode__c', 'Coupon_Type__c', 'Issue_Type__c', 'Offer_Type__c', 'Name', 'Offer_Description__c',
+                    'Redeem_Rule__c', 'Channel__c', 'Offer_Value__c', 'inventory__c', 'Is_Active__c', 'transferable__c','CurrencyIsoCode',
+                    'Term_Type__c', 'Effective_Date__c', 'Expired_Date__c', 'Expire_Days__c', 'Visible_Source__c', 'Qualification__c'
+            };
+            for (Coupon_Template__c newCouponTemplate : newCouponTemplateMap.values()) {
+                if (Utils.fieldsChanged(oldCouponTemplateMap.get(newCouponTemplate.Id), newCouponTemplate, fieldsChangeString)) {
+                    syncCouponTemplateMap.put(newCouponTemplate.Id, newCouponTemplate);
+                }
+            }
+        }
+        if (syncCouponTemplateMap.isEmpty()) {
+            return;
+        }
+        List<MQCouponTemplateMessage.data> couponTemplateMessageDataList = new List<MQCouponTemplateMessage.data>();
+        for (Coupon_Template__c couponTemplate : syncCouponTemplateMap.values()) {
+            couponTemplateMessageDataList.add(new MQCouponTemplateMessage.data(couponTemplate));
+        }
+        MQBaseMessage.Message MQMessage = MQSyncHelper.toMQMessage(couponTemplateMessageDataList, action, 'couponTemplate');
+        AsyncOperationHelper.createRecord(MQMessage, 'AsyncMQCalloutImpl');
+    }
+}
