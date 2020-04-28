@@ -1,0 +1,55 @@
+/**
+ * @Description 
+ * @Author Charles Zheng
+ * @Date 2020/4/28
+ * @Version 1.0
+ **/
+
+public class AochuangServiceHelper {
+
+    /*
+    * Description: 接口 "/api/ThirdParty/listCallRecord" 请求Body.
+    * */
+    public class ListCallRecordApiHttpBody{
+        public Integer pageSize{get;set;}
+        public Integer pageIndex{get;set;}
+        public String accountSecret{get;set;}
+        public ListCallRecordApiHttpBody(Integer size,Integer page,String secret){
+            this.pageSize = size;
+            this.pageIndex = page;
+            this.accountSecret = secret;
+        }
+    }
+    public static void aochuangResponseToCallCenterBasicDataMapping(List<Object> responses){
+
+        Id recordId = [SELECT Id FROM RecordType WHERE Name = 'Aochuang' LIMIT 1][0].Id;
+
+        List<CallCenterBasicData__c> newCalls = new List<CallCenterBasicData__c>();
+        for(Object obj : responses){
+            CallCenterBasicData__c callItem  = new CallCenterBasicData__c();
+            Map<String,Object> objKeyValuePairs = (Map<String,Object>)obj;
+            callItem.uuid__c = String.valueOf(objKeyValuePairs.get('id'));
+            callItem.phone__c = String.valueOf(objKeyValuePairs.get('phone'));
+            callItem.calltype__c = String.valueOf(objKeyValuePairs.get('callType')); //TBD
+            //callItem.calldate__c = Datetime.valueOf(objKeyValuePairs.get('beginTime')); //TBD
+            callItem.Voice_Recording_URL__c = String.valueOf(objKeyValuePairs.get('phone'));
+            callItem.calltime1__c = Double.valueOf(objKeyValuePairs.get('duration'));
+            callItem.Voice_Recording_URL__c =String.valueOf(objKeyValuePairs.get('mp3AudioUrl'));
+            callItem.Message__c = String.valueOf(objKeyValuePairs.get('skipReason'));
+            callItem.RecordTypeId = recordId;
+            newCalls.add(callItem);
+        }
+        if(newCalls.size() > 0){
+            insert newCalls;
+        }
+    }
+    /*
+    * Description: 记录日志
+    * */
+    public static void RecordCalloutLog(String logName,String resBody){
+        Callout_Log__c aoChuangLog =  new Callout_Log__c();
+        aoChuangLog.Name = logName;
+        aoChuangLog.DataBody__c = resBody;
+        insert aoChuangLog;
+    }
+}
