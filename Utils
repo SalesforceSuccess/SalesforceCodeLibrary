@@ -1,3 +1,11 @@
 public void ConvertTimestampToDatetime(Long timestamp){
   Datetime dt = Datetime.newInstance(timestamp);
 }
+
+public static String grabParameter(String name) {
+        return ApexPages.currentPage().getParameters().get(name);
+    }
+    
+    public static Boolean runningInASandbox() {
+        return [SELECT Id, IsSandbox FROM Organization LIMIT 1].IsSandbox;
+    }
